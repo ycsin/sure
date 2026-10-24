@@ -75,7 +75,7 @@ class UI::Account::Chart < ApplicationComponent
     @effective_period ||= begin
       p = @period || Period.last_30_days
       acc_start = account.history_start_date
-      if p.key == "all_time" && acc_start.present? && acc_start > p.start_date
+      if p.key == "all_time" && acc_start.present? && (acc_start > p.start_date || provider_reported_history?)
         Period.new(key: "all_time", start_date: acc_start, end_date: p.end_date)
       else
         p
@@ -212,6 +212,14 @@ class UI::Account::Chart < ApplicationComponent
   end
 
   private
+    # A linked investment account's history_start_date is where the history
+    # its provider reported begins (see Balance::LinkedInvestmentSeriesNormalizer),
+    # never a stray valuation or opening anchor, so All shows all of it even
+    # when it predates the family's first transaction or trade.
+    def provider_reported_history?
+      account.linked? && account.balance_type == :investment
+    end
+
     # Prefixes positive gains with "+"; other views keep plain Money formatting.
     def signed_format(money)
       return money.format unless view == "gains" && money.amount.positive?

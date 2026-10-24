@@ -1,0 +1,113 @@
+---
+en:
+  providers:
+    etoro:
+      name: eToro
+      connection_description: Connect an eToro trading account via API key
+      institution_name: eToro
+  etoro_items:
+    defaults:
+      name: eToro
+    etoro_item:
+      deletion_in_progress: Deletion in progress
+      syncing: Syncing
+      requires_update: API keys need attention
+      error: Error
+      synced: Synced %{time} ago. %{summary}.
+      never_synced: Never synced.
+      setup_accounts: Set up accounts
+      delete: Delete
+      accounts_need_setup: Account needs setup
+      accounts_need_setup_description: Your eToro account needs to be linked to a Sure account.
+      no_accounts_discovered: No eToro account discovered yet.
+      no_accounts_discovered_description: Run a sync after saving your API keys to discover your account.
+    setup_accounts:
+      page_title: Set Up eToro Account
+      dialog_title: Set Up Your eToro Account
+      subtitle: Link your eToro trading account.
+      info_box:
+        title: eToro API Import
+        items:
+          item_1: Current positions, including copy-trading, valued in USD
+          item_2: Buys and sells of positions closed in the last 12 months
+          item_3: Daily account value for the last 12 months (eToro does not report deposits, withdrawals or dividends)
+      status:
+        fetching_accounts: Fetching account from eToro...
+        no_accounts_found_title: No account found.
+        no_accounts_found_description: Sure could not find an eToro trading account. Check that your API keys are valid.
+      available_accounts:
+        title: Available account
+        account_type_investment: Investment
+        account_summary: "%{account_type} • Balance: %{balance}"
+        account_id: "Account ID: %{account_id}"
+      link_existing:
+        description: Or link the discovered eToro account to an existing manual investment account.
+        manual_account_option: "%{name} (%{balance})"
+        select_prompt: Select an account...
+      linked_accounts:
+        title: Already linked
+        linked_to_html: "Linked to: %{account}"
+      buttons:
+        refresh: Refresh
+        cancel: Cancel
+        back_to_settings: Back to Settings
+        create_selected_accounts: Create selected accounts
+        link: Link
+        done: Done
+    sync:
+      status:
+        checking_credentials: Checking eToro credentials...
+        importing_account: Importing eToro account...
+        checking_configuration: Checking account configuration...
+        accounts_need_setup:
+          one: 1 eToro account needs setup...
+          other: "%{count} eToro accounts need setup..."
+        processing_activity: Processing positions and activity...
+        calculating_balances: Calculating balances...
+      partial_failures:
+        trade_history: Trade history
+        balance_history: Daily account value
+        instrument_metadata: Instrument details
+        instruments_not_described:
+          one: eToro returned no details for 1 instrument, so its positions and trades are not imported yet. The next sync asks again.
+          other: "eToro returned no details for %{count} instruments, so their positions and trades are not imported yet. The next sync asks again."
+        skipped_after_rate_limit: Not fetched because eToro's rate limit was reached. The next sync fetches it.
+        trade_history_truncated: Stopped after %{pages} pages, so older trades were not fetched.
+      errors:
+        records_failed:
+          one: 1 holding, trade or daily balance could not be imported.
+          other: "%{count} holdings, trades or daily balances could not be imported."
+    sync_status:
+      no_accounts: No eToro account discovered yet
+      all_linked:
+        one: 1 account linked
+        other: "%{count} accounts linked"
+      partial: "%{linked} linked, %{unlinked} need setup"
+    select_existing_account:
+      title: Link eToro account
+      no_accounts_available: No unlinked eToro accounts are available yet.
+      run_sync_hint: "Run a sync from Settings > Providers after saving your API keys."
+      wait_for_sync: Wait for the account discovery sync to finish.
+      account_summary: "%{currency} • Balance: %{balance}"
+      link: Link
+      cancel: Cancel
+    create:
+      success: Successfully configured eToro.
+    update:
+      success: Successfully updated eToro configuration.
+    destroy:
+      success: Scheduled eToro connection for deletion.
+    select_accounts:
+      not_configured: eToro is not configured.
+    link_existing_account:
+      not_found: Account or eToro configuration not found.
+      only_manual_investment: Only manual investment accounts can be linked to eToro.
+      already_linked: This eToro account is already linked.
+      success: Successfully linked to eToro account.
+      failed: Failed to link eToro account.
+    complete_account_setup:
+      success:
+        one: Successfully created %{count} eToro account.
+        other: Successfully created %{count} eToro accounts.
+      none_selected: No accounts were selected.
+      none_created: No accounts were created.

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_20_090001) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_24_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -744,6 +744,41 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_20_090001) do
     t.index ["reconciled_by_statement_id"], name: "index_entries_on_reconciled_by_statement", where: "(reconciled_by_statement_id IS NOT NULL)"
     t.index ["user_modified"], name: "index_entries_on_user_modified_true", where: "(user_modified = true)"
     t.check_constraint "reconciled_by_statement_id IS NULL OR reconciled_at IS NOT NULL", name: "chk_entries_reconciled_at_present_when_statement_set"
+  end
+
+  create_table "etoro_accounts", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "account_type"
+    t.decimal "cash_balance", precision: 19, scale: 4
+    t.datetime "created_at", null: false
+    t.string "currency"
+    t.decimal "current_balance", precision: 19, scale: 4
+    t.string "etoro_account_id"
+    t.uuid "etoro_item_id", null: false
+    t.datetime "last_positions_sync"
+    t.string "name"
+    t.jsonb "position_settlement_types", default: {}, null: false
+    t.jsonb "raw_balance_history_payload", default: [], null: false
+    t.jsonb "raw_positions_payload", default: [], null: false
+    t.jsonb "raw_trades_payload", default: [], null: false
+    t.date "trades_synced_through"
+    t.datetime "updated_at", null: false
+    t.index ["etoro_item_id", "etoro_account_id"], name: "index_etoro_accounts_on_item_and_account_id", unique: true, where: "(etoro_account_id IS NOT NULL)"
+    t.index ["etoro_item_id"], name: "index_etoro_accounts_on_etoro_item_id"
+  end
+
+  create_table "etoro_items", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "api_key"
+    t.datetime "created_at", null: false
+    t.uuid "family_id", null: false
+    t.string "name"
+    t.boolean "pending_account_setup", default: false, null: false
+    t.jsonb "raw_instruments_payload", default: {}, null: false
+    t.boolean "scheduled_for_deletion", default: false, null: false
+    t.string "status", default: "good", null: false
+    t.datetime "updated_at", null: false
+    t.string "user_key"
+    t.index ["family_id"], name: "index_etoro_items_on_family_id"
+    t.index ["status"], name: "index_etoro_items_on_status"
   end
 
   create_table "eval_datasets", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -3010,6 +3045,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_20_090001) do
   add_foreign_key "entries", "accounts", on_delete: :cascade
   add_foreign_key "entries", "entries", column: "parent_entry_id", on_delete: :cascade
   add_foreign_key "entries", "imports"
+  add_foreign_key "etoro_accounts", "etoro_items"
+  add_foreign_key "etoro_items", "families"
   add_foreign_key "eval_results", "eval_runs"
   add_foreign_key "eval_results", "eval_samples"
   add_foreign_key "eval_runs", "eval_datasets"

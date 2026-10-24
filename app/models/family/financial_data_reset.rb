@@ -61,6 +61,7 @@ class Family::FinancialDataReset
     up_items
     monobank_items
     fio_items
+    etoro_items
   ].freeze
 
   Result = Struct.new(:user, :family, :dry_run, :before_counts, :deleted_counts, :after_counts, keyword_init: true)
