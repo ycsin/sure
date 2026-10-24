@@ -455,13 +455,20 @@ class Account::ProviderImportAdapter
           # Security::Resolver returns a different security instance for the same ticker)
           # Scope by account_provider_id to avoid cross-provider overwrites
           # Skip if ticker is blank to avoid matching NULL tickers
+          # The same ticker on another exchange can be a different company, so a
+          # known exchange has to agree with this one's, the same listing coming
+          # before one stored without an exchange. Without an exchange of its
+          # own, the security matches only when a single listing is held.
           unless holding || security.ticker.blank?
             scope = account.holdings
               .joins("INNER JOIN securities AS ps ON ps.id = holdings.provider_security_id")
               .where(date: date, currency: currency)
               .where("ps.ticker = ?", security.ticker)
+            venues = Security.exchange_operating_mic_lookup_values(security.exchange_operating_mic)
+            scope = scope.where("COALESCE(ps.exchange_operating_mic, '') = '' OR ps.exchange_operating_mic IN (?)", venues) if venues.any?
             scope = scope.where(account_provider_id: account_provider_id) if account_provider_id.present?
-            holding = scope.first
+            candidates = scope.order(Arel.sql("COALESCE(ps.exchange_operating_mic, '') = ''"), :id).limit(2).to_a
+            holding = candidates.first if venues.any? || candidates.one?
           end
 
           # Fallback path 2: match by (security, date, currency) — and when provided,
