@@ -527,6 +527,9 @@ class Account::ProviderImportAdapter
           Rails.logger.warn(
             "ProviderImportAdapter: cross-provider holding collision for account=#{account.id} security=#{security.id} date=#{date} currency=#{currency}; returning existing id=#{existing_composite.id}"
           )
+          # As when an insert fails below: an unsaved record left on the
+          # account's holdings would be inserted when the account is saved.
+          account.holdings.target.delete(holding) if holding.new_record?
           return existing_composite
         end
       end
@@ -586,6 +589,10 @@ class Account::ProviderImportAdapter
         # that can occur when another provider (or concurrent import) already
         # created a row for this composite key. Use the existing row and keep
         # the outer transaction valid by isolating the error in a savepoint.
+        # The row that failed to insert was built on the account's holdings, so
+        # drop it there too: saving the account would otherwise insert it again.
+        account.holdings.target.delete(holding) if holding.new_record?
+
         existing = account.holdings.find_by(
           security: security,
           date: date,

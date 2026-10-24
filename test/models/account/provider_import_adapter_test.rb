@@ -833,6 +833,44 @@ class Account::ProviderImportAdapterTest < ActiveSupport::TestCase
     assert_equal 1, account.holdings.where(date: Date.current, provider_security: [ blank, listed ]).count
   end
 
+  test "a holding another provider already has today leaves the account saveable" do
+    account, adapter, account_provider = provider_holding_setup
+    other_provider = AccountProvider.create!(account: account, provider: snaptrade_accounts(:vanguard_ira))
+    security = Security.create!(ticker: "XPRV", name: "Cross Provider Fund")
+
+    [ [ account_provider, "lot_a" ], [ other_provider, "lot_b" ] ].each do |provider, external_id|
+      adapter.import_holding(
+        security: security, quantity: 10, amount: 1000, currency: "USD", date: Date.current, price: 100,
+        external_id: external_id, source: "plaid", account_provider_id: provider.id
+      )
+    end
+
+    assert_nothing_raised { account.update!(cash_balance: 0) }
+    assert_equal 1, account.holdings.where(security: security, date: Date.current).count
+  end
+
+  test "a provider row that collides with a calculated row leaves the account saveable" do
+    account, adapter, account_provider = provider_holding_setup
+    security = Security.create!(ticker: "CLSH", name: "Collision Fund")
+    account.holdings.create!(security: security, date: Date.current, currency: "USD", qty: 3, price: 100, amount: 300)
+
+    holding = adapter.import_holding(
+      security: security,
+      quantity: 10,
+      amount: 1000,
+      currency: "USD",
+      date: Date.current,
+      price: 100,
+      external_id: "lot_collision",
+      source: "plaid",
+      account_provider_id: account_provider.id
+    )
+
+    assert_equal [ account_provider.id, 10 ], holding.reload.values_at(:account_provider_id, :qty)
+    assert_nothing_raised { account.update!(cash_balance: 0) }
+    assert_equal 1, account.holdings.where(security: security, date: Date.current).count
+  end
+
   test "matches a same-day holding whose ticker resolved without an exchange" do
     account, adapter, account_provider = provider_holding_setup
     bare = Security.create!(ticker: "SAME", name: "Same Fund")
