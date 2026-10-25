@@ -84,6 +84,12 @@
           <%= render "accounts/index/account_groups", accounts: visible_accounts %>
         <% end %>
 
+        <% if Current.user&.admin? %>
+          <% etoro_item.etoro_accounts.select { |etoro_account| visible_accounts.include?(etoro_account.current_account) }.each do |etoro_account| %>
+            <%= render "etoro_items/display_mode", etoro_item: etoro_item, etoro_account: etoro_account %>
+          <% end %>
+        <% end %>
+
         <% stats = etoro_item.syncs.ordered.first&.sync_stats || {} %>
         <%= render ProviderSyncSummary.new(stats: stats, provider_item: etoro_item, show_account_details: visible_accounts.size == etoro_item.accounts.size) %>
 

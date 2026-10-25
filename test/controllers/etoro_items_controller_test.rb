@@ -216,6 +216,87 @@ class EtoroItemsControllerTest < ActionDispatch::IntegrationTest
     assert @item.reload.syncing?
   end
 
+  test "accounts page lets an admin choose how a linked account shows" do
+    @etoro_account.ensure_account_provider!(accounts(:investment))
+
+    get accounts_url
+
+    assert_response :success
+    assert_select "form[action=?]", update_display_mode_etoro_item_path(@item) do
+      assert_select "input[name=etoro_account_id][value=?]", @etoro_account.id
+      assert_select "input[name=display_mode][value=holdings]"
+      assert_select "[role=option][data-value=totals]", text: I18n.t("etoro_items.display_mode.options.totals")
+    end
+  end
+
+  test "each account's display mode control is labelled by its own label" do
+    @etoro_account.ensure_account_provider!(accounts(:investment))
+    second = @item.etoro_accounts.create!(etoro_account_id: "second", name: "Second", currency: "USD")
+    second.ensure_account_provider!(Account.create_from_etoro_account(second))
+
+    get accounts_url
+
+    triggers = css_select("form[action='#{update_display_mode_etoro_item_path(@item)}'] button[aria-haspopup=listbox]")
+    assert_equal 2, triggers.size
+    assert_equal 2, triggers.map { |trigger| trigger["id"] }.uniq.size
+
+    triggers.each do |trigger|
+      label_id, trigger_id = trigger["aria-labelledby"].to_s.split
+      assert_equal trigger["id"], trigger_id
+      assert_select "label##{label_id}", count: 1
+    end
+  end
+
+  test "accounts page shows the display mode without the choice while a sync runs" do
+    @etoro_account.ensure_account_provider!(accounts(:investment))
+    @item.syncs.create!
+
+    get accounts_url
+
+    assert_select "form[action=?]", update_display_mode_etoro_item_path(@item), count: 0
+    assert_select "p", text: I18n.t("etoro_items.display_mode.wait_for_sync")
+  end
+
+  test "changing the display mode saves it and syncs the connection" do
+    patch update_display_mode_etoro_item_url(@item), params: { etoro_account_id: @etoro_account.id, display_mode: "totals" }
+
+    assert_redirected_to accounts_path
+    assert_equal I18n.t("etoro_items.update_display_mode.success"), flash[:notice]
+    assert @etoro_account.reload.shown_as_totals?
+    assert_enqueued_with(job: SyncJob, args: [ @item.syncs.sole ])
+  end
+
+  test "keeping the display mode starts no sync" do
+    patch update_display_mode_etoro_item_url(@item), params: { etoro_account_id: @etoro_account.id, display_mode: "holdings" }
+
+    assert_redirected_to accounts_path
+    assert_empty @item.syncs
+  end
+
+  test "the display mode waits for a sync under way" do
+    @item.syncs.create!
+
+    patch update_display_mode_etoro_item_url(@item), params: { etoro_account_id: @etoro_account.id, display_mode: "totals" }
+
+    assert_equal I18n.t("etoro_items.update_display_mode.syncing"), flash[:alert]
+    assert @etoro_account.reload.shown_as_holdings?
+  end
+
+  test "an unknown display mode is refused" do
+    patch update_display_mode_etoro_item_url(@item), params: { etoro_account_id: @etoro_account.id, display_mode: "per_copy" }
+
+    assert_equal I18n.t("etoro_items.update_display_mode.invalid"), flash[:alert]
+    assert @etoro_account.reload.shown_as_holdings?
+  end
+
+  test "a member who is not an admin cannot change the display mode" do
+    sign_in users(:family_member)
+
+    patch update_display_mode_etoro_item_url(@item), params: { etoro_account_id: @etoro_account.id, display_mode: "totals" }
+
+    assert @etoro_account.reload.shown_as_holdings?
+  end
+
   test "destroy unlinks the account and schedules the connection for deletion" do
     @etoro_account.ensure_account_provider!(accounts(:investment))
 

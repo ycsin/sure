@@ -1,0 +1,20 @@
+<%# locals: (etoro_item:, etoro_account:) %>
+<%# How a linked eToro account shows in Sure. Picking a mode saves it and syncs
+    the connection, which rebuilds the account; a sync under way finishes first.
+    Ids are scoped to the account, as a card lists one control per account. %>
+<% account = etoro_account.current_account %>
+<div class="px-4 space-y-1">
+  <% if etoro_item.syncing? %>
+    <p class="text-sm text-primary"><%= t(".current", account: account.name, mode: t(".options.#{etoro_account.display_mode}")) %></p>
+    <p class="text-xs text-secondary"><%= t(".wait_for_sync") %></p>
+  <% else %>
+    <%= form_with url: update_display_mode_etoro_item_path(etoro_item), method: :patch, namespace: dom_id(etoro_account, :display_mode),
+                  class: "max-w-xs", data: { controller: "auto-submit-form", turbo_frame: "_top" } do |form| %>
+      <%= hidden_field_tag :etoro_account_id, etoro_account.id, id: nil %>
+      <%= render DS::Select.new(form: form, method: :display_mode, selected: etoro_account.display_mode, scoped_ids: true,
+                                label: t(".label", account: account.name),
+                                items: EtoroAccount.display_modes.keys.map { |mode| { value: mode, label: t(".options.#{mode}") } }) %>
+    <% end %>
+    <p class="text-xs text-secondary"><%= t(".hint.#{etoro_account.display_mode}") %></p>
+  <% end %>
+</div>

@@ -155,17 +155,19 @@ class EtoroItem < ApplicationRecord
   # EtoroItem::PriceHistoryImporter#release_unused).
   def release_unused_prices!
     accounts = etoro_accounts.reload.to_a
-    return if accounts.empty? || accounts.any? { |etoro_account| EtoroItem::PriceHistoryImporter.pricing_account(etoro_account) }
+    in_use = accounts.any? { |etoro_account| EtoroItem::PriceHistoryImporter.pricing_account(etoro_account) && etoro_account.shown_as_holdings? }
+    return if accounts.empty? || in_use
 
     EtoroItem::PriceHistoryImporter.new(self, accounts.first, provider: nil).release_unused
   end
 
   # The securities the family's other eToro connections price for an
-  # account linked to them, as after linking the account to a new
-  # connection. Their prices stay when this connection stops pricing them.
+  # account linked to them and shown as holdings, as after linking the
+  # account to a new connection. Their prices stay when this connection stops
+  # pricing them.
   def securities_priced_elsewhere
     family.etoro_items.where.not(id: id).includes(etoro_accounts: :account_provider).each_with_object(Set.new) do |item, security_ids|
-      next unless item.etoro_accounts.any?(&:account_provider)
+      next unless item.etoro_accounts.any? { |etoro_account| etoro_account.account_provider && etoro_account.shown_as_holdings? }
 
       item.priced_histories.each { |history| security_ids << history["security_id"] }
     end

@@ -225,6 +225,7 @@ Rails.application.routes.draw do
       post :sync
       get :setup_accounts
       post :complete_account_setup
+      patch :update_display_mode
     end
   end
 

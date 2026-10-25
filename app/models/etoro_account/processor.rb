@@ -23,6 +23,9 @@ class EtoroAccount::Processor
 
     def import_records
       update_account_balance!
+      return import_totals if etoro_account.shown_as_totals?
+
+      EtoroAccount::TotalsProcessor.clear(account)
       securities = {}
       holdings = EtoroAccount::HoldingsProcessor.new(etoro_account, securities: securities)
       holdings_value = holdings.process
@@ -40,6 +43,17 @@ class EtoroAccount::Processor
         holdings: holdings.imported_count,
         failed_records: holdings.failed_count + activities.failed_count + balance_history.failed_count
       }
+    end
+
+    def import_totals
+      totals = EtoroAccount::TotalsProcessor.new(etoro_account)
+      account.update!(cash_balance: total_balance - totals.process)
+
+      balance_history = EtoroAccount::BalanceHistoryProcessor.new(etoro_account)
+      balance_history.process
+      totals.fit_opening_anchor!
+
+      { holdings: 1, failed_records: balance_history.failed_count }
     end
 
     def account

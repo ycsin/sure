@@ -59,6 +59,38 @@ earlier days stay on the old security, and those days count the moved units twic
 - it still has trades of a position eToro no longer lists, as after linking the account to
   a new eToro connection, whose trade history starts later.
 
+## Holdings or totals
+
+Each linked eToro account has a **Show as** setting in its eToro card on the Accounts page
+(admins only). It can be changed when no sync is running; changing it starts a sync that
+rebuilds the account.
+
+- **Holdings** (the default) imports the holdings, trades and price history described
+  above.
+- **Totals only** shows the account as eToro reports it as a whole. On every day of eToro's
+  daily account value, and today, the account's balance is eToro's total and its cash is
+  eToro's cash; everything else, held directly or through copy-trading, is a single holding
+  named "eToro investments", worth the total less the cash. Use it when the holdings history
+  is wrong, as when most positions are copy-trading mirrors whose closes eToro's trade
+  history leaves out.
+
+In totals mode Sure keeps no eToro trades, per-position holdings or eToro prices for the
+account: switching to it deletes them, and the securities eToro priced for the account go
+back to Sure as they do when the account is unlinked. A trade you added by hand stays. The
+investments holding has no cost basis, so the account shows no investment returns, and as a
+holding cannot be worth less than nothing, a day whose cash exceeds its total shows a zero
+holding and the total as cash. A day eToro sent no figures for keeps the investments value of
+the day before it and the cash of the day after it; a day with a total but no cash keeps the
+total and the investments value of the day before. The account's history starts the day
+before eToro's first daily value. Sure still fetches the positions and the trade history, but
+no instrument details or prices.
+
+Switching back to **Holdings** removes the investments holding and rebuilds the holdings and
+trades from the positions and trades Sure has stored, then fetches the price history again.
+The holdings eToro reported on earlier days are not restored; the history before today is
+worked back from the trades. Trades that only an earlier eToro connection of the account
+stored are not restored either.
+
 ## Price history
 
 Sure values past holdings at each day's price. A security a price provider covers

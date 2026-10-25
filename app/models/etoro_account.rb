@@ -9,6 +9,13 @@ class EtoroAccount < ApplicationRecord
 
   belongs_to :etoro_item
 
+  # How the account shows in Sure. As holdings, each security eToro holds is
+  # a holding and each position's opening and closes are trades. As totals,
+  # the account follows eToro's daily total and cash, and whatever is not cash
+  # is one holding (see EtoroAccount::TotalsProcessor). A change takes effect
+  # on the next sync, which rebuilds the account from the stored payloads.
+  enum :display_mode, { holdings: "holdings", totals: "totals" }, prefix: :shown_as, default: :holdings, validate: true
+
   has_one :account_provider, as: :provider, dependent: :destroy
   has_one :account, through: :account_provider, source: :account
   has_one :linked_account, through: :account_provider, source: :account

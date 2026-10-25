@@ -130,8 +130,9 @@ class EtoroItem::PriceHistoryImporter
   end
 
   # Returns the failures to report, and when eToro rate limited the fetch.
-  # Nothing is fetched for an account not linked to Sure, which has no
-  # holdings to value.
+  # Nothing is fetched for an account not linked to Sure, or shown by its
+  # totals, which has no holdings of eToro's instruments to value; the
+  # securities it priced go back to Sure.
   def import
     return result if release_unused
 
@@ -159,10 +160,10 @@ class EtoroItem::PriceHistoryImporter
   end
 
   # Hands back the securities eToro priced once the account values no
-  # holdings with them: unlinked, disabled or being deleted. Asks eToro
-  # nothing. Returns whether it did.
+  # holdings with them: unlinked, disabled, being deleted or shown by its
+  # totals. Asks eToro nothing. Returns whether it did.
   def release_unused
-    return false unless account.nil?
+    return false unless account.nil? || @etoro_account.shown_as_totals?
 
     release(instruments_map.keys.select { |id| history_of(id)["security_id"] })
     save_history!

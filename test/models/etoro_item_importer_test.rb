@@ -345,6 +345,22 @@ class EtoroItemImporterTest < ActiveSupport::TestCase
     assert_equal I18n.t("etoro_items.sync.partial_failures.skipped_after_rate_limit"), result[:partial_failures].last[:message]
   end
 
+  test "an account shown by its totals asks for no instrument details and hands back its prices after a rate limit" do
+    etoro_accounts(:main_account).update!(display_mode: :totals)
+    etoro_accounts(:main_account).ensure_account_provider!(accounts(:investment))
+    expect_quiet_sync(positions: [ { "positionID" => 1, "instrumentID" => 1001, "settlementTypeID" => 1 } ])
+    @provider.expects(:fetch_instruments).never
+    @provider.expects(:fetch_trade_history_page)
+      .raises(Provider::Etoro::RateLimitError.new("eToro rate limit exceeded.", status_code: 429))
+    EtoroItem::PriceHistoryImporter.any_instance.expects(:import)
+      .returns(EtoroItem::PriceHistoryImporter::Result.new(partial_failures: [], rate_limited_at: nil))
+
+    result = EtoroItem::Importer.new(@item, provider: @provider).import
+
+    assert_equal [ :trade_history, :balance_history ], result[:partial_failures].map { |failure| failure[:what] }
+    assert_equal [ "1" ], etoro_accounts(:main_account).reload.raw_positions_payload.map { |position| position["positionID"].to_s }
+  end
+
   test "imports a trading account with a zero balance" do
     expect_balances(total: 0, available: 0)
     @provider.expects(:fetch_portfolio).returns({ "clientPortfolio" => { "positions" => [] } })

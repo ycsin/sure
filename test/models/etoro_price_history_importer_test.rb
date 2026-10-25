@@ -1127,6 +1127,17 @@ class EtoroPriceHistoryImporterTest < ActiveSupport::TestCase
     assert_empty @acme.prices
   end
 
+  test "an account shown by its totals fetches no prices and hands its securities back without eToro's prices" do
+    seed_history(3001, through: Date.new(2026, 10, 21), close: "100")
+    @acme.update!(offline_reason: OFFLINE_REASON)
+    @etoro_account.update!(display_mode: :totals)
+
+    assert_empty import.partial_failures
+    assert_nil @acme.reload.offline_reason
+    assert_empty @acme.prices
+    assert_nil history(3001)["security_id"]
+  end
+
   test "the holdings history values a split day at eToro's adjusted prices" do
     @etoro_account.update!(
       current_balance: 1500,

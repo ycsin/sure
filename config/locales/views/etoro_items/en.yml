@@ -21,6 +21,18 @@ en:
       accounts_need_setup_description: Your eToro account needs to be linked to a Sure account.
       no_accounts_discovered: No eToro account discovered yet.
       no_accounts_discovered_description: Run a sync after saving your API keys to discover your account.
+    display_mode:
+      label: Show %{account} as
+      hint:
+        holdings: Each stock, ETF or crypto is a holding, with the buys and sells of its positions.
+        totals: eToro's daily total and cash, with everything invested as one holding.
+      current: "%{account} shows as: %{mode}"
+      wait_for_sync: You can change this once the sync finishes.
+      options:
+        holdings: Holdings
+        totals: Totals only
+    totals:
+      security_name: eToro investments
     setup_accounts:
       page_title: Set Up eToro Account
       dialog_title: Set Up Your eToro Account
@@ -115,6 +127,10 @@ en:
       already_linked: This eToro account is already linked.
       success: Successfully linked to eToro account.
       failed: Failed to link eToro account.
+    update_display_mode:
+      success: Saved. eToro is syncing to rebuild the account.
+      syncing: Wait for the sync to finish before changing how the account is shown.
+      invalid: That is not a way the account can be shown.
     complete_account_setup:
       success:
         one: Successfully created %{count} eToro account.

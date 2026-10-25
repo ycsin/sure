@@ -88,7 +88,9 @@ class EtoroItem::Importer
       etoro_item.update!(status: :good)
     end
 
-    refresh_instruments!(etoro_account)
+    # An account shown by its totals values no instrument, but keeps the
+    # positions and trades eToro sends for a return to holdings.
+    refresh_instruments!(etoro_account) unless etoro_account.shown_as_totals?
     import_price_history!(etoro_account)
 
     { success: true, partial_failures: @partial_failures, rate_limited_at: @rate_limited_at }
@@ -305,9 +307,10 @@ class EtoroItem::Importer
     # what eToro does not send now, a later sync fetches, and the positions
     # and balances saved before them stand whatever happens to them, a key
     # the price endpoints refuse among it: the account's own endpoints have
-    # just taken it.
+    # just taken it. An account shown by its totals fetches nothing, so it
+    # hands back the securities eToro priced for it even after a rate limit.
     def import_price_history!(etoro_account)
-      if rate_limited? && etoro_account.current_account
+      if rate_limited? && etoro_account.current_account && !etoro_account.shown_as_totals?
         skip_after_rate_limit(:price_history) if instrument_ids(etoro_account).any?
         return
       end

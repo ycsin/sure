@@ -1,6 +1,6 @@
 class EtoroItemsController < ApplicationController
-  before_action :set_etoro_item, only: [ :update, :destroy, :sync, :setup_accounts, :complete_account_setup ]
-  before_action :require_admin!, only: [ :create, :select_accounts, :select_existing_account, :link_existing_account, :update, :destroy, :sync, :setup_accounts, :complete_account_setup ]
+  before_action :set_etoro_item, only: [ :update, :destroy, :sync, :setup_accounts, :complete_account_setup, :update_display_mode ]
+  before_action :require_admin!, only: [ :create, :select_accounts, :select_existing_account, :link_existing_account, :update, :destroy, :sync, :setup_accounts, :complete_account_setup, :update_display_mode ]
 
   def create
     @etoro_item = Current.family.etoro_items.build(etoro_item_params)
@@ -42,6 +42,26 @@ class EtoroItemsController < ApplicationController
     respond_to do |format|
       format.html { redirect_back_or_to accounts_path }
       format.json { head :ok }
+    end
+  end
+
+  # A sync under way may have processed the account already, so the change
+  # waits until it ends, and the sync it schedules rebuilds the account.
+  def update_display_mode
+    etoro_account = @etoro_item.etoro_accounts.find(params[:etoro_account_id])
+    mode = params[:display_mode].to_s
+
+    if @etoro_item.syncing?
+      redirect_back_or_to accounts_path, alert: t(".syncing"), status: :see_other
+    elsif !EtoroAccount.display_modes.key?(mode)
+      redirect_back_or_to accounts_path, alert: t(".invalid"), status: :see_other
+    else
+      if etoro_account.display_mode != mode
+        etoro_account.update!(display_mode: mode)
+        @etoro_item.sync_later
+      end
+
+      redirect_back_or_to accounts_path, notice: t(".success"), status: :see_other
     end
   end
 
