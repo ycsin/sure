@@ -50,7 +50,11 @@ class EtoroItem < ApplicationRecord
     linked_etoro_accounts.includes(account_provider: :account).each_with_object([]) do |etoro_account, results|
       account = etoro_account.current_account
       next unless account
-      next if account.pending_deletion? || account.disabled?
+      next if account.pending_deletion?
+      # A disabled copy is still emptied once its main account is no longer
+      # split: the main account then counts the copy's positions, and net
+      # worth counts a disabled account's history before it was disabled.
+      next if account.disabled? && !(etoro_account.copy? && !etoro_account.split_into_copies?)
 
       begin
         result = EtoroAccount::Processor.new(etoro_account).process
@@ -154,20 +158,20 @@ class EtoroItem < ApplicationRecord
   # holdings with them, without asking eToro anything (see
   # EtoroItem::PriceHistoryImporter#release_unused).
   def release_unused_prices!
-    accounts = etoro_accounts.reload.to_a
-    in_use = accounts.any? { |etoro_account| EtoroItem::PriceHistoryImporter.pricing_account(etoro_account) && etoro_account.shown_as_holdings? }
+    accounts = etoro_accounts.reload.reject(&:copy?)
+    in_use = accounts.any? { |etoro_account| EtoroItem::PriceHistoryImporter.pricing_account(etoro_account) && !etoro_account.shown_as_totals? }
     return if accounts.empty? || in_use
 
     EtoroItem::PriceHistoryImporter.new(self, accounts.first, provider: nil).release_unused
   end
 
   # The securities the family's other eToro connections price for an
-  # account linked to them and shown as holdings, as after linking the
-  # account to a new connection. Their prices stay when this connection stops
-  # pricing them.
+  # account linked to them and shown by its holdings, as holdings or split
+  # into copies, as after linking the account to a new connection. Their
+  # prices stay when this connection stops pricing them.
   def securities_priced_elsewhere
     family.etoro_items.where.not(id: id).includes(etoro_accounts: :account_provider).each_with_object(Set.new) do |item, security_ids|
-      next unless item.etoro_accounts.any? { |etoro_account| etoro_account.account_provider && etoro_account.shown_as_holdings? }
+      next unless item.etoro_accounts.any? { |etoro_account| !etoro_account.copy? && etoro_account.account_provider && !etoro_account.shown_as_totals? }
 
       item.priced_histories.each { |history| security_ids << history["security_id"] }
     end

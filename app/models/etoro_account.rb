@@ -9,12 +9,24 @@ class EtoroAccount < ApplicationRecord
 
   belongs_to :etoro_item
 
+  # A copy-trading mirror shown as an account of its own, beside the eToro
+  # account it belongs to (see EtoroAccount::CopiesProcessor). Its positions
+  # and history are the main account's, kept there.
+  belongs_to :main_account, class_name: "EtoroAccount", optional: true
+  has_many :copy_accounts, class_name: "EtoroAccount", foreign_key: :main_account_id, inverse_of: :main_account, dependent: :destroy
+  has_many :portfolio_snapshots, class_name: "EtoroPortfolioSnapshot", dependent: :delete_all
+
   # How the account shows in Sure. As holdings, each security eToro holds is
   # a holding and each position's opening and closes are trades. As totals,
   # the account follows eToro's daily total and cash, and whatever is not cash
-  # is one holding (see EtoroAccount::TotalsProcessor). A change takes effect
-  # on the next sync, which rebuilds the account from the stored payloads.
-  enum :display_mode, { holdings: "holdings", totals: "totals" }, prefix: :shown_as, default: :holdings, validate: true
+  # is one holding (see EtoroAccount::TotalsProcessor). As copies, each
+  # copy-trading mirror is an account of its own and this one keeps the rest
+  # (see EtoroAccount::CopiesProcessor). A change takes effect on the next
+  # sync, which rebuilds the account from the stored payloads. A copy account
+  # is always shown as copies.
+  enum :display_mode, { holdings: "holdings", totals: "totals", copies: "copies" }, prefix: :shown_as, default: :holdings, validate: true
+
+  scope :main_accounts, -> { where(main_account_id: nil) }
 
   has_one :account_provider, as: :provider, dependent: :destroy
   has_one :account, through: :account_provider, source: :account
@@ -22,6 +34,7 @@ class EtoroAccount < ApplicationRecord
 
   validates :currency, presence: true
   validates :etoro_account_id, uniqueness: { scope: :etoro_item_id, allow_nil: true }
+  validates :mirror_id, presence: true, if: :main_account_id?
 
   def current_account
     account || linked_account
@@ -60,4 +73,60 @@ class EtoroAccount < ApplicationRecord
   def instruments_map
     etoro_item.instruments_map
   end
+
+  def copy?
+    main_account_id.present?
+  end
+
+  # Whether the account is split into a main account and one per copy, as
+  # its main account's setting says for a copy account.
+  def split_into_copies?
+    copy? ? main_account&.shown_as_copies? || false : shown_as_copies?
+  end
+
+  # The account whose payloads hold the positions: a copy's main account.
+  def positions_owner
+    copy? ? main_account : self
+  end
+
+  # The open positions this account shows: a copy's mirror's, and for the
+  # main account all of eToro's, or only those the user opened when split
+  # into copies.
+  def held_positions
+    positions = Array(positions_owner&.raw_positions_payload)
+    return positions unless copy? || shown_as_copies?
+
+    part = copy? ? mirror_id.to_i : EtoroPortfolioSnapshot::OWN_POSITIONS
+    positions.select { |position| position_mirror_id(position) == part }
+  end
+
+  # The first day Sure recorded a copy's mirror, where its history starts.
+  def copy_recorded_since
+    copy_snapshots&.minimum(:date)
+  end
+
+  # The day a copy was found closed, while it is.
+  def copy_closed_on
+    latest = copy_snapshots&.order(date: :desc)&.first
+    latest.date if latest&.closed?
+  end
+
+  # The account's own linked Sure account, unless it is being deleted. A
+  # disabled one still counts: net worth leaves it out from the day it was
+  # disabled, as for any disabled account, and counts its history before.
+  def shown_account
+    account = current_account
+    account unless account.nil? || account.pending_deletion?
+  end
+
+  private
+
+    def copy_snapshots
+      main_account&.portfolio_snapshots&.where(mirror_id: mirror_id) if copy?
+    end
+
+    def position_mirror_id(position)
+      key = position.keys.find { |candidate| candidate.to_s.casecmp?("mirrorID") } if position.is_a?(Hash)
+      key ? position[key].to_i : EtoroPortfolioSnapshot::OWN_POSITIONS
+    end
 end

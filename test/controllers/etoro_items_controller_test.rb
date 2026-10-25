@@ -297,6 +297,55 @@ class EtoroItemsControllerTest < ActionDispatch::IntegrationTest
     assert @etoro_account.reload.shown_as_holdings?
   end
 
+  test "accounts page offers per copy portfolio, and no control for a copy account" do
+    @etoro_account.update!(display_mode: :copies)
+    @etoro_account.ensure_account_provider!(accounts(:investment))
+    copy = copy_of(@etoro_account, mirror_id: 7)
+    copy.ensure_account_provider!(Account.create_from_etoro_account(copy))
+
+    get accounts_url
+
+    assert_select "form[action=?]", update_display_mode_etoro_item_path(@item), count: 1 do
+      assert_select "input[name=etoro_account_id][value=?]", @etoro_account.id
+      assert_select "[role=option][data-value=copies]", text: I18n.t("etoro_items.display_mode.options.copies")
+    end
+  end
+
+  test "a copy account has no display mode of its own" do
+    copy = copy_of(@etoro_account, mirror_id: 7)
+
+    patch update_display_mode_etoro_item_url(@item), params: { etoro_account_id: copy.id, display_mode: "totals" }
+
+    assert_response :not_found
+    assert copy.reload.shown_as_copies?
+  end
+
+  test "setup accounts lists a copy with the day its history starts" do
+    @etoro_account.update!(display_mode: :copies)
+    @etoro_account.portfolio_snapshots.create!(mirror_id: 7, date: Date.new(2026, 10, 22), total: 100, cash: 10, username: "trader")
+    copy = copy_of(@etoro_account, mirror_id: 7)
+
+    get setup_accounts_etoro_item_url(@item)
+
+    assert_response :success
+    assert_select "input[name='account_ids[]'][value=?]", copy.id
+    assert_select "p", text: I18n.t("etoro_items.copy_status.recorded_since", date: I18n.l(Date.new(2026, 10, 22), format: :long))
+    assert_select "li", text: I18n.t("etoro_items.setup_accounts.info_box.items.copies")
+  end
+
+  test "setting up a copy processes its main account too" do
+    @etoro_account.update!(display_mode: :copies)
+    @etoro_account.ensure_account_provider!(accounts(:investment))
+    copy = copy_of(@etoro_account, mirror_id: 7)
+    processed = []
+    EtoroAccount::Processor.stubs(:new).with { |etoro_account| processed << etoro_account.id }.returns(stub(process: nil))
+
+    post complete_account_setup_etoro_item_url(@item), params: { account_ids: [ copy.id ] }
+
+    assert_equal [ copy.id, @etoro_account.id ], processed
+    assert copy.reload.current_account
+  end
+
   test "destroy unlinks the account and schedules the connection for deletion" do
     @etoro_account.ensure_account_provider!(accounts(:investment))
 
@@ -310,6 +359,13 @@ class EtoroItemsControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+    def copy_of(main, mirror_id:)
+      main.copy_accounts.create!(
+        etoro_item: main.etoro_item, mirror_id: mirror_id, etoro_account_id: "#{main.etoro_account_id}-copy-#{mirror_id}",
+        name: "eToro copy: trader", currency: "USD", display_mode: :copies
+      )
+    end
 
     # A manual investment account another member owns, optionally shared with
     # the signed-in admin.

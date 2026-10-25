@@ -31,6 +31,20 @@ class EtoroAccount::TotalsProcessor
       end
     end
 
+    # Starts the account the day before its oldest entry, either way. Only
+    # the zero anchor a linked account starts with is moved, as
+    # Account#ensure_opening_anchor_precedes_entries does.
+    def fit_opening_anchor!(account)
+      return unless account.has_opening_anchor? && account.opening_anchor_balance.zero?
+
+      anchor_entry_id = account.valuations.opening_anchor.first&.entry&.id
+      oldest = account.entries.where.not(id: anchor_entry_id).minimum(:date)
+      return if oldest.nil? || account.opening_anchor_date == oldest.prev_day
+
+      result = account.set_opening_anchor_balance(balance: 0, date: oldest.prev_day)
+      raise Provider::Etoro::Error, "Failed to move the opening balance: #{result.error}" unless result.success?
+    end
+
     # Takes the totals off an account shown as holdings again. The holdings
     # history works out the days before today again from the trades.
     def clear(account)
@@ -61,17 +75,9 @@ class EtoroAccount::TotalsProcessor
 
   # Starts the account the day before the first of eToro's daily balances,
   # where its history begins once the trades, which may reach further back,
-  # are gone. Only the zero anchor a linked account starts with is moved, as
-  # Account#ensure_opening_anchor_precedes_entries does.
+  # are gone.
   def fit_opening_anchor!
-    return unless account.has_opening_anchor? && account.opening_anchor_balance.zero?
-
-    anchor_entry_id = account.valuations.opening_anchor.first&.entry&.id
-    oldest = account.entries.where.not(id: anchor_entry_id).minimum(:date)
-    return if oldest.nil? || account.opening_anchor_date == oldest.prev_day
-
-    result = account.set_opening_anchor_balance(balance: 0, date: oldest.prev_day)
-    raise Provider::Etoro::Error, "Failed to move the opening balance: #{result.error}" unless result.success?
+    self.class.fit_opening_anchor!(account)
   end
 
   private

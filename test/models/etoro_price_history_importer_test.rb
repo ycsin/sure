@@ -240,6 +240,39 @@ class EtoroPriceHistoryImporterTest < ActiveSupport::TestCase
     assert_nil shared.reload.offline_reason
   end
 
+  test "an account split into copies prices the securities its copy accounts hold" do
+    @etoro_account.update!(display_mode: :copies)
+    copy = @etoro_account.copy_accounts.create!(etoro_item: @item, mirror_id: 7, etoro_account_id: "copy-7", name: "eToro copy: trader", currency: "USD", display_mode: :copies)
+    copy_account = families(:dylan_family).accounts.create!(name: "eToro copy", balance: 0, cash_balance: 0, currency: "USD", accountable: Investment.new)
+    copy.ensure_account_provider!(copy_account)
+    copy_account.holdings.create!(security: @acme, date: Date.current, qty: 1, price: 10, amount: 10, currency: "USD")
+    adjusted = prices_between(Date.new(2026, 1, 5), Date.new(2026, 10, 23))
+    expect_raw(3001, from: Date.new(2026, 5, 24), closes: adjusted)
+    expect_adjusted(3001, "OneDay", adjusted)
+
+    import
+
+    assert_equal every_day(adjusted, from: Date.new(2026, 6, 1), through: Date.new(2026, 10, 23)), stored_prices(@acme)
+    assert_equal OFFLINE_REASON, @acme.reload.offline_reason
+  end
+
+  test "leaving copies keeps the prices of the securities the copy accounts still hold" do
+    seed_history(3001, through: Date.new(2026, 10, 23), close: "100")
+    @acme.update!(offline_reason: OFFLINE_REASON)
+    copy = @etoro_account.copy_accounts.create!(etoro_item: @item, mirror_id: 7, etoro_account_id: "copy-7", name: "eToro copy: trader", currency: "USD", display_mode: :copies)
+    copy_account = families(:dylan_family).accounts.create!(name: "eToro copy", balance: 0, cash_balance: 0, currency: "USD", accountable: Investment.new)
+    copy.ensure_account_provider!(copy_account)
+    # The sync that leaves copies imports prices before the copy account is emptied.
+    copy_account.holdings.create!(security: @acme, date: Date.current, qty: 1, price: 10, amount: 10, currency: "USD")
+
+    assert_no_difference -> { copy_account.syncs.count } do
+      import
+    end
+
+    assert_equal 2, @acme.prices.count
+    assert_equal @acme.id, history(3001)["security_id"]
+  end
+
   test "hands a security back to Sure without eToro's prices once eToro no longer prices it" do
     seed_history(3001, through: Date.new(2026, 10, 23), close: "100")
     @acme.update!(offline_reason: OFFLINE_REASON)

@@ -26,13 +26,22 @@ en:
       hint:
         holdings: Each stock, ETF or crypto is a holding, with the buys and sells of its positions.
         totals: eToro's daily total and cash, with everything invested as one holding.
+        copies: Each copy-trading portfolio is an account of its own, from the day Sure first recorded it. This account keeps the positions you opened and your cash.
       current: "%{account} shows as: %{mode}"
       wait_for_sync: You can change this once the sync finishes.
       options:
         holdings: Holdings
         totals: Totals only
+        copies: Per copy portfolio
     totals:
       security_name: eToro investments
+    copies:
+      account_name: "eToro copy: %{trader}"
+      transfer_to: Transfer to %{account}
+      transfer_from: Transfer from %{account}
+    copy_status:
+      recorded_since: Copy portfolio, recorded since %{date}
+      closed: Copy closed on %{date}
     setup_accounts:
       page_title: Set Up eToro Account
       dialog_title: Set Up Your eToro Account
@@ -43,6 +52,7 @@ en:
           item_1: Current positions, including copy-trading, valued in USD
           item_2: Buys and sells of positions closed in the last 12 months
           item_3: Daily account value for the last 12 months (eToro does not report deposits, withdrawals or dividends)
+          copies: Each copy portfolio's history starts on the day Sure first recorded it, as eToro reports no past figures of a copy
       status:
         fetching_accounts: Fetching account from eToro...
         no_accounts_found_title: No account found.

@@ -59,7 +59,7 @@ earlier days stay on the old security, and those days count the moved units twic
 - it still has trades of a position eToro no longer lists, as after linking the account to
   a new eToro connection, whose trade history starts later.
 
-## Holdings or totals
+## Holdings, totals or per copy portfolio
 
 Each linked eToro account has a **Show as** setting in its eToro card on the Accounts page
 (admins only). It can be changed when no sync is running; changing it starts a sync that
@@ -73,6 +73,9 @@ rebuilds the account.
   named "eToro investments", worth the total less the cash. Use it when the holdings history
   is wrong, as when most positions are copy-trading mirrors whose closes eToro's trade
   history leaves out.
+- **Per copy portfolio** shows each copy-trading portfolio as an account of its own, named
+  "eToro copy: " and the trader you copy, beside the eToro account, which keeps the
+  positions you opened yourself and your available cash (see below).
 
 In totals mode Sure keeps no eToro trades, per-position holdings or eToro prices for the
 account: switching to it deletes them, and the securities eToro priced for the account go
@@ -90,6 +93,58 @@ trades from the positions and trades Sure has stored, then fetches the price his
 The holdings eToro reported on earlier days are not restored; the history before today is
 worked back from the trades. Trades that only an earlier eToro connection of the account
 stored are not restored either.
+
+### Per copy portfolio
+
+Each copy account holds the copy's open positions, valued at eToro's figures, and the cash
+the copy holds uninvested; the eToro account holds the positions you opened and the rest of
+the account. Together they are eToro's total. Each copy eToro lists becomes an account to
+set up from the eToro card (**Set up accounts**), and so does a copy you start later. A copy
+you do not set up stays in the eToro account, as part of a holding named "eToro
+investments".
+
+eToro reports no past figures of a copy, so Sure records each copy, and the positions you
+opened, on every sync, whatever the account is shown as, from the first sync after this
+version is installed. What is exact, and from when:
+
+- **Before the first day Sure recorded the account** the eToro account holds the whole
+  account, as in totals mode: eToro's daily total and cash, with the rest as the
+  investments holding. The copy accounts have no history then.
+- **From the first day a copy was recorded** its account's daily value is the copy's value
+  that day, as the day's last sync saw it, and its holdings are the copy's positions that
+  day. A day no sync ran keeps the day before. The eToro account's daily value is eToro's
+  daily total less the copies', and its holdings are the positions you opened that day.
+  As Sure records a copy during the day and eToro's daily total is taken at the end of it,
+  the eToro account absorbs the difference, so the accounts always add up to eToro's total.
+- **Money moving.** On a copy's first day its positions move from the eToro account to the
+  copy account as the copy's holdings, and its cash, the rest of its value, as a transfer,
+  so the copy account holds nothing the day before. Money you add to or take out of a copy
+  later, as eToro counts it between two syncs, moves as a transfer on the day Sure sees it.
+  When you stop copying, the copy's last recorded value moves back on the day Sure no longer
+  finds the copy; the copy account stays, with its history, at zero from then on, and the
+  setup page shows it as closed. A copy closed before you set it up is no longer offered. A
+  sync later on a copy's first day updates that day's transfer to the copy's latest cash.
+- **Disabling a copy account** leaves it as it was that day: net worth counts it until the
+  day before, as for any disabled account, and its value stays out of the eToro account,
+  so from that day net worth no longer includes the copy. Enabling it again brings it up
+  to date on the next sync. Deleting a copy account gives its value back to the eToro
+  account over the whole history, as if the copy had not been set up. Unlinking one does
+  the same, while the unlinked account stays as a manual account Sure no longer updates;
+  delete it to keep the copy from counting twice.
+
+Sure keeps no trades of eToro's positions in this mode, as the closed-trade history does
+not say which copy a position belonged to; the past holdings come from Sure's own records
+only. The positions' cost basis is known only for today. eToro's prices are still fetched
+for the securities the eToro account and its copy accounts hold, as all of them are your
+own accounts, in any mode (so switching away from copies keeps the prices), and still not
+for a security another of your accounts holds.
+
+Switching from per copy portfolio to holdings or totals removes the transfers and the past
+holdings the split wrote from the eToro account, and empties each copy account: its
+holdings, eToro entries and balance go, while the account stays linked. A disabled copy
+account is emptied too, so the eToro account, which then counts the copy's positions, is
+not counted twice with it. Copies not set up are dropped. Switching back rebuilds the copy accounts and the split from Sure's records, so
+the history is the same as before; a copy you have to set up again is offered once more.
 
 ## Price history
 

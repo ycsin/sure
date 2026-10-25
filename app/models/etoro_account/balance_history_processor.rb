@@ -3,8 +3,11 @@ class EtoroAccount::BalanceHistoryProcessor
 
   attr_reader :failed_count
 
-  def initialize(etoro_account)
+  # `totals`, [date, total] pairs, stand in for eToro's daily balances, as
+  # for an account split into copies (see EtoroAccount::CopiesProcessor).
+  def initialize(etoro_account, totals: nil)
     @etoro_account = etoro_account
+    @snapshots = totals
     @failed_count = 0
   end
 

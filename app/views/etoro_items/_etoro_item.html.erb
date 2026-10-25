@@ -85,7 +85,7 @@
         <% end %>
 
         <% if Current.user&.admin? %>
-          <% etoro_item.etoro_accounts.select { |etoro_account| visible_accounts.include?(etoro_account.current_account) }.each do |etoro_account| %>
+          <% etoro_item.etoro_accounts.select { |etoro_account| !etoro_account.copy? && visible_accounts.include?(etoro_account.current_account) }.each do |etoro_account| %>
             <%= render "etoro_items/display_mode", etoro_item: etoro_item, etoro_account: etoro_account %>
           <% end %>
         <% end %>

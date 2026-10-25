@@ -486,7 +486,125 @@ class EtoroItemImporterTest < ActiveSupport::TestCase
     assert_equal [ { "date" => "2026-10-20", "total" => "100" } ], account.raw_balance_history_payload
   end
 
+  test "records what each part of the account is worth, whatever it is shown as" do
+    import_portfolio(mirrors: [ mirror(7, "trader_a", available: 20, deposits: 50) ])
+
+    account = @item.etoro_accounts.find_by!(etoro_account_id: "etoro_trading_1")
+    own = account.portfolio_snapshots.find_by!(mirror_id: 0, date: Date.current)
+    assert_equal [ BigDecimal("400"), BigDecimal("300") ], [ own.total, own.cash ], "the available cash and the positions the user opened"
+    assert_equal({ "1001" => { "units" => "2.0", "value" => "100.0" } }, own.holdings)
+    copy = account.portfolio_snapshots.find_by!(mirror_id: 7, date: Date.current)
+    assert_equal [ BigDecimal("140"), BigDecimal("20"), BigDecimal("50"), BigDecimal("0"), "trader_a", false ],
+      [ copy.total, copy.cash, copy.deposits, copy.withdrawals, copy.username, copy.closed ]
+    assert_equal({ "1002" => { "units" => "3.0", "value" => "110.0" } }, copy.holdings, "a CFD is cash, not a holding")
+    assert_empty account.copy_accounts, "copies become accounts only when the account is split"
+
+    import_portfolio(mirrors: [ mirror(7, "trader_a", available: 25, deposits: 50) ])
+    assert_equal 1, account.portfolio_snapshots.where(mirror_id: 7).count, "a later sync the same day replaces the day's figures"
+    assert_equal BigDecimal("25"), account.portfolio_snapshots.find_by!(mirror_id: 7).cash
+  end
+
+  test "records as a part's holdings the positions the holdings import takes" do
+    @item.update!(raw_instruments_payload: {
+      "1002" => { "symbol" => "STKA", "type_id" => 5 },
+      "1004" => { "symbol" => "CMDTY", "type_id" => 2 }
+    })
+    etoro_accounts(:main_account).update!(position_settlement_types: { "76" => 0 })
+    buy = ->(id, instrument_id) { { "positionID" => id, "instrumentID" => instrument_id, "mirrorID" => 7, "isBuy" => true, "leverage" => 1, "units" => 1, "amount" => 10, "unrealizedPnL" => { "pnL" => 0 } } }
+    import_portfolio(mirrors: [ mirror(7, "trader_a").merge("positions" => [ buy.(72, 1002), buy.(74, 1004), buy.(75, 1005), buy.(76, 1002) ]) ])
+
+    holdings = etoro_accounts(:main_account).portfolio_snapshots.find_by!(mirror_id: 7, date: Date.current).holdings
+    # A stock bought without leverage is owned, and so is an instrument eToro
+    # describes later in the sync. A commodity is a CFD, and so is a position
+    # an earlier sync saw settled as one.
+    assert_equal({
+      "1002" => { "units" => "1.0", "value" => "10.0" },
+      "1005" => { "units" => "1.0", "value" => "10.0", "assumed_units" => "1.0", "assumed_value" => "10.0" }
+    }, holdings, "the part counted only until eToro describes the instrument is marked")
+  end
+
+  test "the positions the user opened leave out a copy's positions eToro lists among them" do
+    copied = { "positionID" => 70, "instrumentID" => 1002, "mirrorID" => 7, "units" => 3, "amount" => 100, "unrealizedPnL" => { "pnL" => 10 }, "settlementTypeID" => 1 }
+    import_portfolio(mirrors: [ mirror(7, "trader_a") ], direct: [ copied ])
+
+    own = etoro_accounts(:main_account).portfolio_snapshots.find_by!(mirror_id: 0, date: Date.current)
+    assert_equal BigDecimal("400"), own.total
+    assert_equal [ "1001" ], own.holdings.keys
+  end
+
+  test "split into copies, each mirror is an account to set up, and one closed before it was set up is dropped" do
+    etoro_accounts(:main_account).update!(display_mode: :copies)
+    import_portfolio(mirrors: [ mirror(7, "trader_a"), mirror(9, "trader_b") ])
+
+    main = etoro_accounts(:main_account).reload
+    assert_equal({ 7 => "eToro copy: trader_a", 9 => "eToro copy: trader_b" }, main.copy_accounts.order(:mirror_id).to_h { |copy| [ copy.mirror_id, copy.name ] })
+    assert main.copy_accounts.all?(&:shown_as_copies?)
+    assert_equal BigDecimal("140"), main.copy_accounts.find_by!(mirror_id: 7).current_balance
+
+    linked = Account.create_from_etoro_account(main.copy_accounts.find_by!(mirror_id: 7))
+    main.copy_accounts.find_by!(mirror_id: 7).ensure_account_provider!(linked)
+
+    travel_to Date.new(2026, 10, 25)
+    import_portfolio(mirrors: [])
+
+    assert_equal [ true, true ], main.portfolio_snapshots.where(date: Date.current, mirror_id: [ 7, 9 ]).order(:mirror_id).pluck(:closed)
+    assert_equal [ 7 ], main.copy_accounts.reload.pluck(:mirror_id), "the copy set up stays, with its history"
+    assert_equal [ Date.current, BigDecimal("0") ], [ main.copy_accounts.sole.copy_closed_on, main.copy_accounts.sole.current_balance ]
+
+    import_portfolio(mirrors: [])
+    assert_equal 2, main.portfolio_snapshots.where(mirror_id: 7).count, "a copy is closed once"
+  end
+
+  test "an account no longer split drops the copies not set up and keeps their figures" do
+    main = etoro_accounts(:main_account)
+    main.update!(display_mode: :copies)
+    import_portfolio(mirrors: [ mirror(7, "trader_a") ])
+    assert_equal 1, main.copy_accounts.count
+
+    main.update!(display_mode: :holdings)
+    import_portfolio(mirrors: [ mirror(7, "trader_a") ])
+
+    assert_empty main.copy_accounts.reload
+    assert main.portfolio_snapshots.where(mirror_id: 7).exists?
+  end
+
+  test "a portfolio without a mirrors list closes no copy" do
+    import_portfolio(mirrors: [ mirror(7, "trader_a") ])
+    import_portfolio(mirrors: nil)
+
+    assert_not etoro_accounts(:main_account).portfolio_snapshots.where(closed: true).exists?
+  end
+
   private
+
+    # A sync of the fixture account with positions the user opened worth 100
+    # and the mirrors given. Only the portfolio matters.
+    def import_portfolio(mirrors:, direct: [])
+      provider = mock("etoro_provider")
+      provider.stubs(:fetch_balances).returns({
+        "balances" => [ { "accountId" => "etoro_trading_1", "accountType" => "Trading", "currency" => "USD", "balance" => 1000, "equityDetails" => { "available" => 300 } } ]
+      })
+      portfolio = { "positions" => [ { "positionID" => 1, "instrumentID" => 1001, "mirrorID" => 0, "units" => 2, "amount" => 90, "unrealizedPnL" => { "pnL" => 10 }, "settlementTypeID" => 1 } ] + direct }
+      portfolio["mirrors"] = mirrors unless mirrors.nil?
+      provider.stubs(:fetch_portfolio).returns({ "clientPortfolio" => portfolio })
+      provider.stubs(:fetch_trade_history_page).returns([])
+      provider.stubs(:fetch_balance_history).returns({ "snapshots" => [] })
+      provider.stubs(:fetch_instruments).returns([])
+      EtoroItem::PriceHistoryImporter.any_instance.stubs(:import).returns(EtoroItem::PriceHistoryImporter::Result.new(partial_failures: [], rate_limited_at: nil))
+
+      EtoroItem::Importer.new(@item, provider: provider).import
+    end
+
+    def mirror(mirror_id, username, available: 20, deposits: 0)
+      {
+        "mirrorID" => mirror_id, "parentUsername" => username, "availableAmount" => available,
+        "depositSummary" => deposits, "withdrawalSummary" => 0,
+        "positions" => [
+          { "positionID" => mirror_id * 10, "instrumentID" => 1002, "mirrorID" => mirror_id, "units" => 3, "amount" => 100, "unrealizedPnL" => { "pnL" => 10 }, "settlementTypeID" => 1 },
+          { "positionID" => mirror_id * 10 + 1, "instrumentID" => 1003, "mirrorID" => mirror_id, "units" => 1, "amount" => 10, "unrealizedPnL" => { "pnL" => 0 }, "settlementTypeID" => 0 }
+        ]
+      }
+    end
 
     def expect_balances(total:, available:)
       @provider.expects(:fetch_balances).with(account_types: "Trading").returns({

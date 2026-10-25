@@ -10,8 +10,9 @@ class EtoroAccount::HoldingsProcessor
     @failed_count = 0
   end
 
-  # Imports one holding per security for the real assets held, directly or
-  # through copy-trading mirrors. eToro can list one stock on several lines
+  # Imports one holding per security for the real assets the account shows
+  # (EtoroAccount#held_positions), held directly or through copy-trading
+  # mirrors. eToro can list one stock on several lines
   # (ABCD and ABCD.RTH); they resolve to one security and make one holding.
   # CFD positions are not holdings: their equity stays in the cash part of the
   # balance. Holdings eToro stopped reporting are closed. Returns the value
@@ -22,6 +23,13 @@ class EtoroAccount::HoldingsProcessor
     value = positions_by_security.sum(BigDecimal("0")) { |security, positions| process_security(security, positions) }
     close_absent_holdings!
     value
+  end
+
+  # What #process imports the holdings at, without importing them.
+  def value
+    positions_by_security.values.sum(BigDecimal("0")) do |positions|
+      quantity_of(positions).positive? ? value_of(positions) : BigDecimal("0")
+    end
   end
 
   private
@@ -47,7 +55,7 @@ class EtoroAccount::HoldingsProcessor
     end
 
     def real_asset_positions
-      Array(@etoro_account.raw_positions_payload).select do |position|
+      @etoro_account.held_positions.select do |position|
         field(position, "instrumentID").present? && real_asset?(position)
       end
     end
@@ -63,11 +71,11 @@ class EtoroAccount::HoldingsProcessor
     # eToro reports a position's amount and cost in USD and its P&L in the
     # account currency, which agree as the importer takes USD accounts only.
     def process_security(security, positions)
-      quantity = positions.sum(BigDecimal("0")) { |position| parse_decimal(field(position, "units")) || 0 }
+      quantity = quantity_of(positions)
       return BigDecimal("0") unless quantity.positive?
 
       cost = positions.sum(BigDecimal("0")) { |position| position_cost(position) || 0 }
-      value = positions.sum(BigDecimal("0")) { |position| (parse_decimal(field(position, "amount")) || 0) + position_pnl(position) }
+      value = value_of(positions)
 
       import_adapter.import_holding(
         security: security,
@@ -103,6 +111,14 @@ class EtoroAccount::HoldingsProcessor
       BigDecimal("0")
     end
 
+    def quantity_of(positions)
+      positions.sum(BigDecimal("0")) { |position| parse_decimal(field(position, "units")) || 0 }
+    end
+
+    def value_of(positions)
+      positions.sum(BigDecimal("0")) { |position| (parse_decimal(field(position, "amount")) || 0) + position_pnl(position) }
+    end
+
     # eToro lists only what is open, so a holding it stops reporting was sold.
     # The newest snapshot holding it would otherwise stay current, and the
     # history before the sale would count it twice; a zero for today closes
@@ -116,7 +132,7 @@ class EtoroAccount::HoldingsProcessor
     # closed while an open position's instrument is undescribed, as that
     # position may be what keeps a holding open.
     def close_absent_holdings!
-      return unless provider_id && @etoro_account.raw_positions_payload.is_a?(Array)
+      return unless provider_id && @etoro_account.positions_owner&.raw_positions_payload.is_a?(Array)
 
       holdings = account.holdings.where(account_provider_id: provider_id)
       latest = holdings.maximum(:date)

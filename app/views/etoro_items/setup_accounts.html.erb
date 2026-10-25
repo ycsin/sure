@@ -13,8 +13,13 @@
       <%= render DS::Note.new(title: t(".info_box.title")) do %>
         <ul class="list-disc list-inside space-y-1">
           <li><%= t(".info_box.items.item_1") %></li>
-          <li><%= t(".info_box.items.item_2") %></li>
+          <% unless @etoro_accounts.any? { |etoro_account| !etoro_account.copy? && etoro_account.shown_as_copies? } %>
+            <li><%= t(".info_box.items.item_2") %></li>
+          <% end %>
           <li><%= t(".info_box.items.item_3") %></li>
+          <% if @etoro_accounts.any?(&:copy?) %>
+            <li><%= t(".info_box.items.copies") %></li>
+          <% end %>
         </ul>
       <% end %>
 
@@ -76,7 +81,9 @@
                           balance: number_to_currency(etoro_account.current_balance || 0, unit: Money::Currency.new(etoro_account.currency.presence || Current.family.currency).symbol)
                         ) %>
                       </p>
-                      <% if etoro_account.etoro_account_id.present? %>
+                      <% if etoro_account.copy? %>
+                        <%= render "etoro_items/copy_status", etoro_account: etoro_account %>
+                      <% elsif etoro_account.etoro_account_id.present? %>
                         <p class="text-xs text-secondary"><%= t(".available_accounts.account_id", account_id: etoro_account.etoro_account_id) %></p>
                       <% end %>
                     </label>
@@ -136,6 +143,9 @@
                     <div>
                       <h4 class="font-medium text-primary"><%= etoro_account.name %></h4>
                       <p class="text-sm text-secondary"><%= t(".linked_accounts.linked_to_html", account: link_to(etoro_account.current_account.name, account_path(etoro_account.current_account), class: "link")) %></p>
+                      <% if etoro_account.copy? %>
+                        <%= render "etoro_items/copy_status", etoro_account: etoro_account %>
+                      <% end %>
                     </div>
                   </div>
                 </div>

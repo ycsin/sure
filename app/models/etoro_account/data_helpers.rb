@@ -192,8 +192,10 @@ module EtoroAccount::DataHelpers
     # The settlementTypeID of every position seen open, on this sync or an
     # earlier one.
     def known_settlement_types
-      @known_settlement_types ||= (@etoro_account.position_settlement_types || {})
-        .merge(settlement_types_of(@etoro_account.raw_positions_payload))
+      @known_settlement_types ||= begin
+        owner = @etoro_account.positions_owner
+        (owner.position_settlement_types || {}).merge(settlement_types_of(owner.raw_positions_payload))
+      end
     end
 
     # Whether an open position or a closed trade is an owned asset rather

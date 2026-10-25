@@ -297,11 +297,20 @@ class EtoroItem::PriceHistoryImporter
     end
 
     # Each other account that holds or trades one of the securities, by
-    # security.
+    # security. The copy accounts of this eToro account are this one, in any
+    # display mode: they hold its positions, which the prices are fetched
+    # for, and still do on the sync that leaves copies, as the prices are
+    # imported before they are emptied.
     def sharing_accounts(security_ids)
-      traded = Trade.joins(:entry).where(security_id: security_ids).where.not(entries: { account_id: account.id }).distinct.pluck(:security_id, "entries.account_id")
-      held = Holding.where(security_id: security_ids).where.not(account_id: account.id).distinct.pluck(:security_id, :account_id)
+      own = own_account_ids
+      traded = Trade.joins(:entry).where(security_id: security_ids).where.not(entries: { account_id: own }).distinct.pluck(:security_id, "entries.account_id")
+      held = Holding.where(security_id: security_ids).where.not(account_id: own).distinct.pluck(:security_id, :account_id)
       (traded + held).uniq
+    end
+
+    def own_account_ids
+      copies = @etoro_account.copy_accounts.includes(account_provider: :account).filter_map(&:current_account)
+      [ account.id, *copies.map(&:id) ].uniq
     end
 
     # A security eToro lists on several lines (ABCD and ABCD.RTH) takes its

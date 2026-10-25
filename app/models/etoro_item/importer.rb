@@ -85,8 +85,11 @@ class EtoroItem::Importer
       end
 
       etoro_account.save!
+      record_snapshots!(etoro_account, balance, portfolio, today)
       etoro_item.update!(status: :good)
     end
+
+    sync_copy_accounts!(etoro_account)
 
     # An account shown by its totals values no instrument, but keeps the
     # positions and trades eToro sends for a return to holdings.
@@ -211,6 +214,143 @@ class EtoroItem::Importer
       mirrored = Array(field(portfolio, "mirrors")).sum(BigDecimal("0")) { |mirror| parse_decimal(field(mirror, "availableAmount")) || 0 }
 
       (parse_decimal(field(field(balance, "equityDetails"), "available")) || BigDecimal("0")) + mirrored
+    end
+
+    # Records what each part of the account is worth today (see
+    # EtoroPortfolioSnapshot), whatever the account is shown as, as eToro
+    # keeps no past figures of a mirror. A later sync the same day replaces
+    # the day's figures. A mirror no longer listed is closed, once; a
+    # portfolio without a mirrors list closes none.
+    def record_snapshots!(etoro_account, balance, data, today)
+      portfolio = field(data, "clientPortfolio") || data
+      mirrors = field(portfolio, "mirrors")
+      available = parse_decimal(field(field(balance, "equityDetails"), "available")) || BigDecimal("0")
+
+      # eToro can list a copy's positions among the user's own as well.
+      own = Array(field(portfolio, "positions")).select { |position| field(position, "mirrorID").to_i == EtoroPortfolioSnapshot::OWN_POSITIONS }
+      rows = [ snapshot_row(etoro_account, EtoroPortfolioSnapshot::OWN_POSITIONS, today, cash: available, positions: own) ]
+      Array(mirrors).each do |mirror|
+        mirror_id = field(mirror, "mirrorID").to_i
+        next unless mirror_id.positive?
+
+        rows << snapshot_row(
+          etoro_account, mirror_id, today,
+          cash: parse_decimal(field(mirror, "availableAmount")) || BigDecimal("0"),
+          positions: field(mirror, "positions"),
+          deposits: parse_decimal(field(mirror, "depositSummary")),
+          withdrawals: parse_decimal(field(mirror, "withdrawalSummary")),
+          username: field(mirror, "parentUsername").presence&.to_s
+        )
+      end
+      rows.concat(closed_snapshot_rows(etoro_account, rows.map { |row| row[:mirror_id] }, today)) if mirrors.is_a?(Array)
+
+      EtoroPortfolioSnapshot.upsert_all(rows, unique_by: %i[etoro_account_id mirror_id date])
+    end
+
+    def snapshot_row(etoro_account, mirror_id, date, cash:, positions:, deposits: nil, withdrawals: nil, username: nil)
+      positions = Array(positions)
+      value = positions.sum(BigDecimal("0")) { |position| position_value(position) }
+
+      {
+        etoro_account_id: etoro_account.id, mirror_id: mirror_id, date: date, closed: false,
+        total: (cash + value).round(4), cash: cash.round(4), deposits: deposits, withdrawals: withdrawals,
+        username: username, holdings: snapshot_holdings(etoro_account, positions)
+      }
+    end
+
+    # A mirror listed on an earlier day and not today was closed: eToro sold
+    # its positions and returned its money to the account's cash.
+    def closed_snapshot_rows(etoro_account, listed_ids, date)
+      latest_mirror_snapshots(etoro_account).filter_map do |snapshot|
+        next if snapshot.closed? || listed_ids.include?(snapshot.mirror_id)
+
+        {
+          etoro_account_id: etoro_account.id, mirror_id: snapshot.mirror_id, date: date, closed: true,
+          total: 0, cash: 0, deposits: snapshot.deposits, withdrawals: snapshot.withdrawals,
+          username: snapshot.username, holdings: {}
+        }
+      end
+    end
+
+    def latest_mirror_snapshots(etoro_account)
+      etoro_account.portfolio_snapshots.mirrors
+        .select("DISTINCT ON (etoro_portfolio_snapshots.mirror_id) etoro_portfolio_snapshots.*")
+        .order(:mirror_id, date: :desc)
+        .to_a
+    end
+
+    # The real-asset positions by instrument, as the holdings import counts
+    # them (see DataHelpers#real_asset?): an owned asset by its settlement
+    # type, from this sync or an earlier one, or an unleveraged buy of a
+    # stock, ETF or crypto when eToro sends none. An instrument eToro has not
+    # described yet counts as one, as the sync describes it before the
+    # holdings import runs; that part is kept as "assumed", for the days to
+    # leave out once eToro describes the instrument as a CFD (see
+    # EtoroAccount::CopiesProcessor#snapshot_held).
+    def snapshot_holdings(etoro_account, positions)
+      totals = positions.each_with_object({}) do |position, holdings|
+        instrument_id = field(position, "instrumentID").to_s
+        settlement_type = field(position, "settlementTypeID")
+        settlement_type = (etoro_account.position_settlement_types || {})[field(position, "positionID").to_s] if settlement_type.nil?
+        instrument = etoro_item.instruments_map[instrument_id]
+        owned = if settlement_type.nil?
+          unleveraged_long?(position) && (instrument.nil? || REAL_ASSET_TYPE_IDS.include?(instrument["type_id"]&.to_i))
+        else
+          settlement_type.to_i == REAL_ASSET_SETTLEMENT_TYPE
+        end
+        next unless owned && instrument_id.present?
+
+        held = holdings[instrument_id] ||= Hash.new(BigDecimal("0"))
+        units = parse_decimal(field(position, "units")) || 0
+        value = position_value(position)
+        held[:units] += units
+        held[:value] += value
+        if settlement_type.nil? && instrument.nil?
+          held[:assumed_units] += units
+          held[:assumed_value] += value
+        end
+      end
+
+      totals.transform_values do |held|
+        held.to_h { |key, amount| [ key.to_s, (key.to_s.end_with?("value") ? amount.round(4) : amount).to_s("F") ] }
+      end
+    end
+
+    def position_value(position)
+      (parse_decimal(field(position, "amount")) || BigDecimal("0")) + position_pnl(position)
+    end
+
+    # Split into copies, each mirror with a snapshot is an account to set up,
+    # named after the trader copied, and one set up stays once the copy is
+    # closed, with its history. One closed before it was set up is dropped,
+    # and so is every one not set up once the account is no longer split:
+    # their snapshots stay with the main account, for a return to copies.
+    def sync_copy_accounts!(etoro_account)
+      copies = etoro_account.copy_accounts.includes(:account_provider).index_by(&:mirror_id)
+
+      unless etoro_account.shown_as_copies?
+        copies.each_value { |copy| copy.destroy! if copy.account_provider.nil? }
+        return
+      end
+
+      latest_mirror_snapshots(etoro_account).each do |snapshot|
+        copy = copies[snapshot.mirror_id]
+        if snapshot.closed? && copy&.account_provider.nil?
+          copy&.destroy!
+          next
+        end
+
+        copy ||= etoro_account.copy_accounts.build(etoro_item: etoro_item, mirror_id: snapshot.mirror_id, display_mode: :copies)
+        copy.update!(
+          etoro_account_id: "#{etoro_account.etoro_account_id}-copy-#{snapshot.mirror_id}",
+          name: I18n.t("etoro_items.copies.account_name", trader: snapshot.username.presence || snapshot.mirror_id),
+          account_type: "trading",
+          currency: etoro_account.currency,
+          current_balance: snapshot.closed? ? 0 : snapshot.total,
+          cash_balance: snapshot.closed? ? 0 : snapshot.cash,
+          last_positions_sync: Time.current
+        )
+      end
     end
 
     def merge_trades(existing, fetched)

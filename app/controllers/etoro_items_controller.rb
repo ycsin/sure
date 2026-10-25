@@ -48,7 +48,7 @@ class EtoroItemsController < ApplicationController
   # A sync under way may have processed the account already, so the change
   # waits until it ends, and the sync it schedules rebuilds the account.
   def update_display_mode
-    etoro_account = @etoro_item.etoro_accounts.find(params[:etoro_account_id])
+    etoro_account = @etoro_item.etoro_accounts.main_accounts.find(params[:etoro_account_id])
     mode = params[:display_mode].to_s
 
     if @etoro_item.syncing?
@@ -127,7 +127,7 @@ class EtoroItemsController < ApplicationController
     raise "Failed to create AccountProvider link" unless provider
 
     begin
-      EtoroAccount::Processor.new(etoro_account.reload).process
+      process_with_main_account(etoro_account.reload)
     rescue => e
       DebugLogEntry.capture(
         category: "sync",
@@ -196,7 +196,7 @@ class EtoroItemsController < ApplicationController
       end
 
       begin
-        EtoroAccount::Processor.new(etoro_account.reload).process
+        process_with_main_account(etoro_account.reload)
       rescue => e
         DebugLogEntry.capture(
           category: "sync",
@@ -223,6 +223,14 @@ class EtoroItemsController < ApplicationController
   end
 
   private
+
+    # A copy set up as an account takes its value out of the main account,
+    # so both are processed, and neither counts the copy twice meanwhile.
+    def process_with_main_account(etoro_account)
+      EtoroAccount::Processor.new(etoro_account).process
+      main = etoro_account.main_account
+      EtoroAccount::Processor.new(main).process if main&.current_account
+    end
 
     def set_etoro_item
       @etoro_item = Current.family.etoro_items.find(params[:id])
