@@ -26,6 +26,14 @@ class Provider::Etoro
 
   TRADE_HISTORY_PAGE_SIZE = 500
   INSTRUMENT_BATCH_SIZE = 50
+  CANDLE_PAGE_LIMIT = 2000
+  ADJUSTED_CANDLE_COUNT = 1000
+  # A safety stop for one instrument's candle pages, far above any history.
+  MAX_CANDLE_PAGES = 10
+  # eToro meters its data and its market-data endpoints separately, at 120
+  # requests a minute each. Price history requests to one of them are spaced
+  # this many seconds apart.
+  PRICE_REQUEST_INTERVAL = 0.5
   MAX_RATE_LIMIT_RETRIES = 2
   MAX_RATE_LIMIT_WAIT = 60
   MAX_SERVER_ERROR_RETRIES = 2
@@ -99,6 +107,45 @@ class Provider::Etoro
     end
   end
 
+  # One instrument's daily candles, newest first, with the pair eToro quotes
+  # it as ("ABCD/USD", "LONX.l/GBX"). The prices are eToro's bid as traded on
+  # the day: a split shows as a jump. eToro sends the candles that open from
+  # `from` until `to`, a day's at 17:00 New York time the evening before it.
+  # Every page is read; eToro takes a `to` past its newest candle.
+  def fetch_daily_candles(instrument_id, from:, to: Date.current.tomorrow)
+    path = "/data/instruments/#{ERB::Util.url_encode(instrument_id.to_s)}/candles"
+    query = { interval: "1d", from: candle_time(from), to: candle_time(to), limit: CANDLE_PAGE_LIMIT }
+    results = []
+    symbol = nil
+
+    MAX_CANDLE_PAGES.times do
+      data = get(path, query: query, quota: :data)
+      page = data.is_a?(Hash) ? data["results"] : nil
+      raise ApiError.new("eToro returned an unexpected candles response", status_code: 200) unless page.is_a?(Array)
+
+      symbol ||= data["symbol"]
+      results.concat(page)
+      pagination = data["pagination"].is_a?(Hash) ? data["pagination"] : {}
+      cursor = pagination["nextCursor"] if pagination["hasNext"]
+      return { "symbol" => symbol, "results" => results } if cursor.blank?
+
+      query = query.merge(cursor: cursor)
+    end
+
+    raise ApiError.new("eToro sent more than #{MAX_CANDLE_PAGES} pages of candles", status_code: 200)
+  end
+
+  # The newest `count` daily ("OneDay") or weekly ("OneWeek") candles of one
+  # instrument, adjusted for splits but not for dividends.
+  def fetch_adjusted_candles(instrument_id, interval:, count: ADJUSTED_CANDLE_COUNT)
+    path = "/market-data/instruments/#{ERB::Util.url_encode(instrument_id.to_s)}/history/candles/desc/#{interval}/#{count}"
+    data = get(path, quota: :market_data)
+    groups = data.is_a?(Hash) ? data["candles"] : nil
+    raise ApiError.new("eToro returned an unexpected candles response", status_code: 200) unless groups.is_a?(Array)
+
+    groups.flat_map { |group| group.is_a?(Hash) ? Array(group["candles"]) : [] }
+  end
+
   private
 
     def request_headers
@@ -111,13 +158,16 @@ class Provider::Etoro
       }
     end
 
-    def get(path, query: {})
+    # A request for price history names the eToro quota it draws on, which
+    # spaces it from the last request to that quota.
+    def get(path, query: {}, quota: nil)
       url = "#{BASE_URI}#{path}"
       rate_limit_retries = 0
       server_error_retries = 0
 
       loop do
         response = with_retries(path) do
+          pace(quota) if quota
           self.class.get(url, headers: request_headers, query: query.compact)
         end
 
@@ -133,8 +183,23 @@ class Provider::Etoro
           next
         end
 
-        return handle_response(response)
+        return handle_response(response, quota: quota)
       end
+    end
+
+    def pace(quota)
+      @requested_at ||= {}
+      wait = @requested_at[quota] && @requested_at[quota] + PRICE_REQUEST_INTERVAL - monotonic_now
+      sleep(wait) if wait&.positive?
+      @requested_at[quota] = monotonic_now
+    end
+
+    def monotonic_now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def candle_time(value)
+      value.in_time_zone("UTC").iso8601
     end
 
     def retry_after(response)
@@ -142,11 +207,18 @@ class Provider::Etoro
       seconds.positive? ? [ seconds, MAX_RATE_LIMIT_WAIT ].min : MAX_RATE_LIMIT_WAIT
     end
 
-    def handle_response(response)
+    def handle_response(response, quota: nil)
       case response.code
       when 200
         parse_body(response)
       when 401, 403
+        # eToro has refused its market data with a 403 for a while and then
+        # served the same key again, so a 403 there is worth a later try,
+        # not new keys.
+        if quota && response.code == 403
+          raise TransientError.new("eToro withheld its market data (status 403)", status_code: 403, response_body: response.body)
+        end
+
         raise AuthenticationError, "eToro authentication failed (#{response.code}). Check your API key and user key."
       when 429
         raise RateLimitError.new(

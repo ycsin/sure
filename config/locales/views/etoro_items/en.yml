@@ -73,6 +73,16 @@ en:
           other: "eToro returned no details for %{count} instruments, so their positions and trades are not imported yet. The next sync asks again."
         skipped_after_rate_limit: Not fetched because eToro's rate limit was reached. The next sync fetches it.
         trade_history_truncated: Stopped after %{pages} pages, so older trades were not fetched.
+        price_history: Price history
+        price_history_incomplete:
+          one: The prices of 1 instrument are left for the next sync, to keep within eToro's request limits.
+          other: "The prices of %{count} instruments are left for the next sync, to keep within eToro's request limits."
+        price_history_missing_rates:
+          one: Sure has no %{currency} exchange rate for 1 day, so eToro's price that day was not stored. The next sync tries again.
+          other: "Sure has no %{currency} exchange rates for %{count} days, so eToro's prices those days were not stored. The next sync tries again."
+        price_history_instruments_failed:
+          one: eToro did not send the prices of 1 instrument. The next sync asks again.
+          other: "eToro did not send the prices of %{count} instruments. The next sync asks again."
       errors:
         records_failed:
           one: 1 holding, trade or daily balance could not be imported.

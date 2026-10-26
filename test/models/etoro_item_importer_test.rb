@@ -290,6 +290,61 @@ class EtoroItemImporterTest < ActiveSupport::TestCase
     assert_raises(Provider::Etoro::AuthenticationError) { EtoroItem::Importer.new(@item, provider: @provider).import }
   end
 
+  test "a linked account's import brings in its price history once the instrument details are saved" do
+    etoro_accounts(:main_account).ensure_account_provider!(accounts(:investment))
+    expect_quiet_sync(positions: [ { "positionID" => 1, "instrumentID" => 1001, "settlementTypeID" => 1 } ])
+    expect_trade_pages([])
+    withheld = { what: :price_history, message: "eToro withheld its market data (status 403)" }
+    EtoroItem::PriceHistoryImporter.any_instance.expects(:import)
+      .with { @item.reload.instruments_map.key?("1001") }
+      .returns(EtoroItem::PriceHistoryImporter::Result.new(partial_failures: [ withheld ], rate_limited_at: nil))
+
+    result = EtoroItem::Importer.new(@item, provider: @provider).import
+
+    assert result[:success]
+    assert_equal [ withheld ], result[:partial_failures]
+  end
+
+  test "a price history that fails unexpectedly is reported and the import still succeeds" do
+    etoro_accounts(:main_account).ensure_account_provider!(accounts(:investment))
+    expect_quiet_sync
+    expect_trade_pages([])
+    EtoroItem::PriceHistoryImporter.any_instance.expects(:import).raises(ZeroDivisionError, "divided by 0")
+
+    result = EtoroItem::Importer.new(@item, provider: @provider).import
+
+    assert result[:success]
+    assert_equal [ { what: :price_history, message: "divided by 0" } ], result[:partial_failures]
+    assert_equal BigDecimal("100"), etoro_accounts(:main_account).reload.current_balance
+  end
+
+  test "a key eToro's price endpoints reject is reported, and the import still succeeds" do
+    etoro_accounts(:main_account).ensure_account_provider!(accounts(:investment))
+    expect_quiet_sync
+    expect_trade_pages([])
+    EtoroItem::PriceHistoryImporter.any_instance.expects(:import).raises(Provider::Etoro::AuthenticationError, "eToro authentication failed (401).")
+
+    result = EtoroItem::Importer.new(@item, provider: @provider).import
+
+    assert result[:success]
+    assert_equal [ { what: :price_history, message: "eToro authentication failed (401)." } ], result[:partial_failures]
+    assert_equal BigDecimal("100"), etoro_accounts(:main_account).reload.current_balance
+  end
+
+  test "a rate limit leaves the price history to the next sync" do
+    etoro_accounts(:main_account).ensure_account_provider!(accounts(:investment))
+    @item.update!(raw_instruments_payload: { "1001" => { "symbol" => "AAPL", "type_id" => 5 } })
+    expect_quiet_sync(positions: [ { "positionID" => 1, "instrumentID" => 1001, "settlementTypeID" => 1 } ])
+    @provider.expects(:fetch_trade_history_page)
+      .raises(Provider::Etoro::RateLimitError.new("eToro rate limit exceeded.", status_code: 429))
+    EtoroItem::PriceHistoryImporter.any_instance.expects(:import).never
+
+    result = EtoroItem::Importer.new(@item, provider: @provider).import
+
+    assert_equal [ :trade_history, :balance_history, :price_history ], result[:partial_failures].map { |failure| failure[:what] }
+    assert_equal I18n.t("etoro_items.sync.partial_failures.skipped_after_rate_limit"), result[:partial_failures].last[:message]
+  end
+
   test "imports a trading account with a zero balance" do
     expect_balances(total: 0, available: 0)
     @provider.expects(:fetch_portfolio).returns({ "clientPortfolio" => { "positions" => [] } })

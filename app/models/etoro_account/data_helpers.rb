@@ -103,6 +103,71 @@ module EtoroAccount::DataHelpers
       ActiveSupport::TimeZone["UTC"].parse(value.to_s)
     end
 
+    # The trading day eToro counts a moment towards. Its daily candles run
+    # from 17:00 New York time to 17:00 the next day, dated by the day they
+    # end, whatever the venue.
+    def session_date(value)
+      time = value.is_a?(String) ? parse_time(value) : value
+      time && (time.in_time_zone("America/New_York") + 7.hours).to_date
+    rescue ArgumentError
+      nil
+    end
+
+    # How many shares one share of the instrument held at the end of `date`
+    # is today: the product of the splits eToro's prices show after that day
+    # (see EtoroItem::PriceHistoryImporter). eToro restates an open position
+    # on today's shares, but a closed one keeps the units it closed with. On
+    # the day eToro's prices switch to the new shares, which can be a trading
+    # day before the exchange's, a leg closed before the switch is on the old
+    # ones: its price (`rate`) is nearer theirs. Splits a price provider's
+    # stored prices are as traded across are left out (`as_traded`).
+    def split_factor_after(instrument_id, date, rate: nil)
+      history = split_history_of(instrument_id)
+      return Rational(1) if date.nil? || history["splits"].blank?
+
+      as_traded = Array(history["as_traded"])
+      history["splits"].reduce(Rational(1)) do |factor, (on, ratio, close)|
+        switch = Date.iso8601(on)
+        ratio = Rational(ratio)
+        after = switch > date || (switch == date && before_switch?(rate, ratio, close))
+        after && !as_traded.include?(on) ? factor * ratio : factor
+      end
+    end
+
+    # The split checks a closed leg follows: those of the instrument whose
+    # closes price its security, as the security's prices follow them (ABCD
+    # for a leg of ABCD.RTH), and otherwise its own.
+    def split_history_of(instrument_id)
+      security = trade_security_for(instrument_id)
+      pricing = security && pricing_histories[security.id]
+      return pricing if pricing&.key?("splits")
+
+      price_history_of(instrument_id)
+    end
+
+    def pricing_histories
+      @pricing_histories ||= instruments_map.each_key.with_object({}) do |instrument_id, histories|
+        history = price_history_of(instrument_id)
+        histories[history["security_id"]] = history if history["security_id"].present?
+      end
+    end
+
+    def price_history_of(instrument_id)
+      details = instruments_map[instrument_id.to_s]
+      history = details["price_history"] if details.is_a?(Hash)
+      history.is_a?(Hash) ? history : {}
+    end
+
+    # Whether a trade on a split's switch day went through at a price nearer
+    # the old shares' than the switch day's close on the new ones.
+    def before_switch?(rate, ratio, close)
+      rate = parse_decimal(rate)
+      close = parse_decimal(close)
+      return false unless rate&.positive? && close&.positive?
+
+      Math.log(rate.to_f / (close.to_f * ratio.to_f)).abs < Math.log(rate.to_f / close.to_f).abs
+    end
+
     # eToro's schema nests pnL under unrealizedPnL, while its example response
     # puts it on the position itself. Both are accepted, nested first.
     def position_pnl(position)
@@ -162,6 +227,35 @@ module EtoroAccount::DataHelpers
       return @securities[key] if @securities.key?(key)
 
       @securities[key] = resolve_security(key)
+    end
+
+    # The security an instrument's trades go on: the one it resolves to, or
+    # the one a user moved its holding to. Holding#remap_security! takes the
+    # trades along, and the holdings import carries the move to each new
+    # day's holding, so the trades stay with the holding.
+    def trade_security_for(instrument_id)
+      security = security_for_instrument(instrument_id)
+      security && (remapped_securities[security.id] || security)
+    end
+
+    # The securities users moved eToro's holdings to, by the ID of the
+    # security eToro reported each one as. The newest holding of a reported
+    # security decides: the holdings import carries a move to each new day's
+    # holding, and when it does not, the trades go back with the holding.
+    def remapped_securities
+      return {} unless provider_id
+
+      @remapped_securities ||= begin
+        newest = account.holdings
+          .where(account_provider_id: provider_id)
+          .where.not(provider_security_id: nil)
+          .select("DISTINCT ON (holdings.provider_security_id) holdings.provider_security_id, holdings.security_id, holdings.security_locked")
+          .order("holdings.provider_security_id", date: :desc, id: :desc)
+          .to_a
+        moved = newest.select { |holding| holding.security_locked? && holding.security_id != holding.provider_security_id }
+        securities = Security.where(id: moved.map(&:security_id)).index_by(&:id)
+        moved.to_h { |holding| [ holding.provider_security_id, securities[holding.security_id] ] }.compact
+      end
     end
 
     # The security an instrument is held as. Nil while eToro has not described

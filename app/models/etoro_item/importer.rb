@@ -35,11 +35,15 @@ class EtoroItem::Importer
 
   # Imports the primary trading account. The PnL endpoint describes the real
   # account as a whole, so its positions belong to that one account.
-  # Positions and the balance must arrive; the history and instrument
-  # metadata are kept from the last sync when eToro fails to send them, and
+  # Positions and the balance must arrive; the histories, instrument metadata
+  # and prices are kept from the last sync when eToro fails to send them, and
   # those failures are returned for the sync to report. An account not held
   # in USD is refused before anything is stored.
   def import
+    # Before asking eToro anything, so that a key eToro now refuses does not
+    # keep its prices on securities no account values with them.
+    etoro_item.release_unused_prices!
+
     balance = primary_trading_balance
     raise Provider::Etoro::ApiError, "eToro returned no trading account" unless balance
 
@@ -85,6 +89,7 @@ class EtoroItem::Importer
     end
 
     refresh_instruments!(etoro_account)
+    import_price_history!(etoro_account)
 
     { success: true, partial_failures: @partial_failures, rate_limited_at: @rate_limited_at }
   end
@@ -293,6 +298,36 @@ class EtoroItem::Importer
     def instrument_ids(etoro_account)
       records = Array(etoro_account.raw_positions_payload) + Array(etoro_account.raw_trades_payload)
       records.filter_map { |record| field(record, "instrumentID")&.to_s.presence }.uniq
+    end
+
+    # Daily prices for the account's past holdings, once its instruments are
+    # described (see EtoroItem::PriceHistoryImporter). Like the histories,
+    # what eToro does not send now, a later sync fetches, and the positions
+    # and balances saved before them stand whatever happens to them, a key
+    # the price endpoints refuse among it: the account's own endpoints have
+    # just taken it.
+    def import_price_history!(etoro_account)
+      if rate_limited? && etoro_account.current_account
+        skip_after_rate_limit(:price_history) if instrument_ids(etoro_account).any?
+        return
+      end
+
+      result = EtoroItem::PriceHistoryImporter.new(etoro_item, etoro_account, provider: provider).import
+      @partial_failures.concat(result.partial_failures)
+      @rate_limited_at ||= result.rate_limited_at
+    rescue => e
+      @partial_failures << { what: :price_history, message: e.message }
+
+      DebugLogEntry.capture(
+        category: "sync",
+        level: "error",
+        message: "EtoroItem::Importer - Failed to import the price history: #{e.class} - #{e.message}",
+        source: "etoro",
+        family: etoro_item.family,
+        account_provider: etoro_account.account_provider,
+        provider_key: "etoro",
+        metadata: { error_class: e.class.name, backtrace: Array(e.backtrace).first(5) }
+      )
     end
 
     # eToro counts requests per user key, and both histories draw on one

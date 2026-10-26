@@ -667,6 +667,90 @@ class EtoroAccountProcessorTest < ActiveSupport::TestCase
     assert_equal today, trade_entry("etoro_position_21_close_#{Time.utc(2026, 10, 24, 19).to_i}").date
   end
 
+  test "a leg closed before a split goes on today's shares, for the same money" do
+    describe_instrument(1001, "price_history" => { "splits" => [ [ "2026-03-02", "2" ] ] })
+
+    process
+
+    buy = trade_entry("etoro_position_21_open")
+    sell = trade_entry("etoro_position_21_close_#{Time.utc(2026, 2, 10, 15).to_i}")
+    assert_equal [ BigDecimal("8"), BigDecimal("400") ], [ buy.trade.qty, buy.amount ]
+    assert_equal [ BigDecimal("-8"), BigDecimal("-440"), BigDecimal("55") ], [ sell.trade.qty, sell.amount, sell.trade.price ]
+  end
+
+  test "eToro's restated open legs and the legs closed after a split stay as eToro reports them" do
+    describe_instrument(1001, "price_history" => { "splits" => [ [ "2026-03-02", "2" ] ] })
+
+    process
+
+    assert_equal BigDecimal("3"), trade_entry("etoro_position_11_open").trade.qty
+    assert_equal BigDecimal("-1"), trade_entry("etoro_position_11_close_#{Time.utc(2026, 5, 1, 12).to_i}").trade.qty
+  end
+
+  test "a position closed partly before a split and partly after is held on today's shares throughout" do
+    @etoro_account.update!(
+      raw_positions_payload: [ position(31, 1001, units: 6, amount: 300, pnl: 0, opened: "2026-01-05T15:00:00Z") ],
+      raw_trades_payload: [
+        closed_trade(31, 1001, units: 2, investment: 200, net_profit: 20, opened: "2026-01-05T15:00:00Z", closed: "2026-02-02T15:00:00Z"),
+        closed_trade(31, 1001, units: 4, investment: 200, net_profit: 40, opened: "2026-01-05T15:00:00Z", closed: "2026-04-01T15:00:00Z")
+      ]
+    )
+    describe_instrument(1001, "price_history" => { "splits" => [ [ "2026-03-02", "2" ] ] })
+
+    process
+    materialize
+
+    assert_equal [ BigDecimal("14"), BigDecimal("700") ], [ trade_entry("etoro_position_31_open").trade.qty, trade_entry("etoro_position_31_open").amount ]
+    assert_held_once BigDecimal("14"), Date.new(2026, 1, 5)..Date.new(2026, 2, 1)
+    assert_held_once BigDecimal("10"), Date.new(2026, 2, 2)..Date.new(2026, 3, 31)
+    assert_held_once BigDecimal("6"), Date.new(2026, 4, 1)..Date.current
+  end
+
+  test "a leg closed on the day eToro's prices switch goes on the shares its price was on" do
+    # eToro's raw closes are on the new shares from 10 February, closing at 55.
+    describe_instrument(1001, "price_history" => { "splits" => [ [ "2026-02-10", "2", "55" ] ] })
+    before_switch = closed_trade(21, 1001, units: 4, investment: 400, net_profit: 40, opened: "2026-01-10T10:00:00Z", closed: "2026-02-10T15:00:00Z")
+    after_switch = closed_trade(23, 1001, units: 2, investment: 100, net_profit: 10, opened: "2026-01-10T10:00:00Z", closed: "2026-02-10T21:30:00Z")
+    @etoro_account.update!(raw_trades_payload: [ before_switch.merge("closeRate" => 110), after_switch.merge("closeRate" => 55) ])
+
+    process
+
+    assert_equal BigDecimal("-8"), trade_entry("etoro_position_21_close_#{Time.utc(2026, 2, 10, 15).to_i}").trade.qty
+    assert_equal BigDecimal("-2"), trade_entry("etoro_position_23_close_#{Time.utc(2026, 2, 10, 21, 30).to_i}").trade.qty
+  end
+
+  test "a split found after a relink keeps a position with closes older than the trade history adding up" do
+    late_close = closed_trade(81, 1001, units: 6, investment: 600, net_profit: 60, opened: "2025-03-03T10:00:00Z", closed: "2025-11-03T15:00:00Z")
+    @etoro_account.update!(raw_positions_payload: [], raw_trades_payload: [
+      closed_trade(81, 1001, units: 4, investment: 400, net_profit: 40, opened: "2025-03-03T10:00:00Z", closed: "2025-06-02T15:00:00Z"),
+      late_close
+    ])
+    process
+
+    # A new connection's trade history starts after the first close, and
+    # eToro's prices show a split since the second.
+    @etoro_account.update!(raw_trades_payload: [ late_close ])
+    describe_instrument(1001, "price_history" => { "splits" => [ [ "2025-11-17", "2" ] ] })
+    process
+
+    assert_equal [ BigDecimal("16"), BigDecimal("1000") ], [ trade_entry("etoro_position_81_open").trade.qty, trade_entry("etoro_position_81_open").amount ]
+    assert_equal BigDecimal("-12"), trade_entry("etoro_position_81_close_#{Time.utc(2025, 11, 3, 15).to_i}").trade.qty
+    assert_equal BigDecimal("0"), position_trades(81).sum { |entry| entry.trade.qty }
+    assert_equal({ buys: 0, sells: 0 }, EtoroAccount::ActivitiesProcessor.new(@etoro_account.reload).process)
+  end
+
+  test "a split found after the trades were stored puts them on today's shares" do
+    process
+    assert_equal BigDecimal("4"), trade_entry("etoro_position_21_open").trade.qty
+
+    describe_instrument(1001, "price_history" => { "splits" => [ [ "2026-03-02", "2" ] ] })
+    process
+
+    assert_equal BigDecimal("8"), trade_entry("etoro_position_21_open").trade.qty
+    assert_equal BigDecimal("-8"), trade_entry("etoro_position_21_close_#{Time.utc(2026, 2, 10, 15).to_i}").trade.qty
+    assert_equal({ buys: 2, sells: 0 }, EtoroAccount::ActivitiesProcessor.new(@etoro_account.reload).process)
+  end
+
   test "records past daily balances as eToro reconciliations once" do
     2.times { EtoroAccount::Processor.new(@etoro_account.reload).process }
 

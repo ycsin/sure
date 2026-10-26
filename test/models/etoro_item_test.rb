@@ -53,6 +53,44 @@ class EtoroItemTest < ActiveSupport::TestCase
     assert AccountProvider.exists?(link.id)
   end
 
+  test "deleting the connection hands the securities eToro priced back to Sure without eToro's prices" do
+    priced = Security.create!(ticker: "ACME", offline: true, offline_reason: EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON)
+    Security::Price.create!(security: priced, date: Date.current, price: 10, currency: "USD")
+    @item.update!(raw_instruments_payload: { "3001" => { "symbol" => "ACME", "price_history" => { "security_id" => priced.id, "currency" => "USD", "written_from" => Date.current.iso8601 } } })
+
+    @item.destroy!
+
+    assert_equal [ true, nil ], [ priced.reload.offline?, priced.offline_reason ]
+    assert_empty priced.prices
+  end
+
+  test "deleting the connection syncs again the accounts valued at eToro's prices" do
+    priced = Security.create!(ticker: "ACME", offline: true, offline_reason: EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON)
+    Security::Price.create!(security: priced, date: Date.current, price: 10, currency: "USD")
+    @item.update!(raw_instruments_payload: { "3001" => { "symbol" => "ACME", "price_history" => { "security_id" => priced.id, "currency" => "USD", "written_from" => Date.current.iso8601 } } })
+    holder = accounts(:investment)
+    holder.holdings.create!(security: priced, date: Date.current, qty: 1, price: 10, amount: 10, currency: "USD")
+
+    assert_difference -> { holder.syncs.count }, 1 do
+      @item.destroy!
+    end
+  end
+
+  test "deleting the connection leaves the prices another connection linked to an account gives a security" do
+    priced = Security.create!(ticker: "ACME", offline: true, offline_reason: EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON)
+    Security::Price.create!(security: priced, date: Date.current, price: 10, currency: "USD")
+    instruments = { "3001" => { "symbol" => "ACME", "price_history" => { "security_id" => priced.id, "currency" => "USD", "written_from" => Date.current.iso8601 } } }
+    @item.update!(raw_instruments_payload: instruments)
+    newer = etoro_items(:pending_setup_item)
+    newer.update!(raw_instruments_payload: instruments)
+    newer.etoro_accounts.create!(name: "eToro", etoro_account_id: "etoro_trading_2", currency: "USD").ensure_account_provider!(accounts(:investment))
+
+    @item.destroy!
+
+    assert_equal EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON, priced.reload.offline_reason
+    assert_equal 1, priced.prices.count
+  end
+
   test "encrypts the instrument metadata when active record encryption is configured" do
     skip "Encryption not configured" unless EtoroItem.encryption_ready?
 

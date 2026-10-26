@@ -16,6 +16,8 @@ class EtoroItem < ApplicationRecord
   validates :api_key, presence: true, on: :create
   validates :user_key, presence: true, on: :create
 
+  before_destroy :release_priced_securities
+
   scope :active, -> { where(scheduled_for_deletion: false) }
   scope :syncable, -> { active.where.not(api_key: [ nil, "" ]) }
   scope :ordered, -> { order(created_at: :desc) }
@@ -138,4 +140,45 @@ class EtoroItem < ApplicationRecord
   def instruments_map
     raw_instruments_payload.is_a?(Hash) ? raw_instruments_payload : {}
   end
+
+  # The price histories of the instruments whose closes go on a security
+  # (see EtoroItem::PriceHistoryImporter).
+  def priced_histories
+    instruments_map.values.filter_map do |details|
+      history = details["price_history"] if details.is_a?(Hash)
+      history if history.is_a?(Hash) && history["security_id"].present?
+    end
+  end
+
+  # Hands back eToro's prices once no account of this connection values
+  # holdings with them, without asking eToro anything (see
+  # EtoroItem::PriceHistoryImporter#release_unused).
+  def release_unused_prices!
+    accounts = etoro_accounts.reload.to_a
+    return if accounts.empty? || accounts.any? { |etoro_account| EtoroItem::PriceHistoryImporter.pricing_account(etoro_account) }
+
+    EtoroItem::PriceHistoryImporter.new(self, accounts.first, provider: nil).release_unused
+  end
+
+  # The securities the family's other eToro connections price for an
+  # account linked to them, as after linking the account to a new
+  # connection. Their prices stay when this connection stops pricing them.
+  def securities_priced_elsewhere
+    family.etoro_items.where.not(id: id).includes(etoro_accounts: :account_provider).each_with_object(Set.new) do |item, security_ids|
+      next unless item.etoro_accounts.any?(&:account_provider)
+
+      item.priced_histories.each { |history| security_ids << history["security_id"] }
+    end
+  end
+
+  private
+
+    # eToro's prices go with the connection, Sure's health checks take the
+    # securities back, and the accounts valued at the prices are synced
+    # again. A sync still running hands back the ones it has written once it
+    # ends (see EtoroItem::PriceHistoryImporter).
+    def release_priced_securities
+      elsewhere = securities_priced_elsewhere
+      EtoroAccount::PriceHistoryProcessor.release(priced_histories.reject { |history| elsewhere.include?(history["security_id"]) })
+    end
 end

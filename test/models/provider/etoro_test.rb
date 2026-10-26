@@ -176,7 +176,113 @@ class Provider::EtoroTest < ActiveSupport::TestCase
     assert_raises(Provider::Etoro::ConfigurationError) { Provider::Etoro.new(api_key: "key", user_key: "") }
   end
 
+  test "reads every page of an instrument's daily candles, prices as eToro sent them" do
+    window = { interval: "1d", from: "2026-01-05T00:00:00Z", to: "2026-10-24T00:00:00Z", limit: "2000" }
+    first = stub_request(:get, "#{BASE}/data/instruments/3001/candles")
+      .with(query: window)
+      .to_return(status: 200, headers: JSON_HEADERS, body: candles_page(results: [ { time: "2026-10-22T21:00:00Z", close: "101.25" } ], next_cursor: "page-2"))
+    second = stub_request(:get, "#{BASE}/data/instruments/3001/candles")
+      .with(query: window.merge(cursor: "page-2"))
+      .to_return(status: 200, headers: JSON_HEADERS, body: candles_page(results: [ { time: "2026-10-21T21:00:00Z", close: 100.5 } ]))
+
+    candles = @provider.fetch_daily_candles(3001, from: Date.new(2026, 1, 5), to: Date.new(2026, 10, 24))
+
+    assert_equal "ACME/USD", candles["symbol"]
+    assert_equal [ "101.25", 100.5 ], candles["results"].map { |candle| candle["close"] }
+    assert_requested first
+    assert_requested second
+  end
+
+  test "asks for candles through the end of today when no end is given" do
+    travel_to Time.utc(2026, 10, 24, 12)
+    request = stub_request(:get, "#{BASE}/data/instruments/3001/candles")
+      .with(query: { interval: "1d", from: "2026-10-12T00:00:00Z", to: "2026-10-25T00:00:00Z", limit: "2000" })
+      .to_return(status: 200, headers: JSON_HEADERS, body: candles_page(results: []))
+
+    assert_equal [], @provider.fetch_daily_candles(3001, from: Date.new(2026, 10, 12))["results"]
+    assert_requested request
+  end
+
+  test "an unrecognised candles body is an error, not an empty history" do
+    stub_request(:get, "#{BASE}/data/instruments/3001/candles")
+      .with(query: hash_including({}))
+      .to_return(status: 200, headers: JSON_HEADERS, body: { message: "maintenance" }.to_json)
+
+    assert_raises(Provider::Etoro::ApiError) { @provider.fetch_daily_candles(3001, from: Date.new(2026, 1, 5)) }
+  end
+
+  test "reads an instrument's newest split-adjusted candles as one list" do
+    request = stub_request(:get, "#{BASE}/market-data/instruments/3001/history/candles/desc/OneWeek/1000")
+      .to_return(status: 200, headers: JSON_HEADERS, body: {
+        interval: "OneWeek",
+        candles: [ { instrumentId: 3001, candles: [
+          { instrumentID: 3001, fromDate: "2026-10-18T21:00:00Z", close: 50.25 },
+          { instrumentID: 3001, fromDate: "2026-10-11T21:00:00Z", close: 49.5 }
+        ] } ]
+      }.to_json)
+
+    candles = @provider.fetch_adjusted_candles(3001, interval: "OneWeek")
+
+    assert_equal [ "2026-10-18T21:00:00Z", "2026-10-11T21:00:00Z" ], candles.map { |candle| candle["fromDate"] }
+    assert_equal [ 50.25, 49.5 ], candles.map { |candle| candle["close"] }
+    assert_requested request
+  end
+
+  test "a 403 from the price endpoints is eToro withholding them for a while, not a rejected key" do
+    forbidden = { status: 403, headers: JSON_HEADERS, body: { errorCode: "InsufficientPermissions" }.to_json }
+    stub_request(:get, "#{BASE}/data/instruments/3001/candles").with(query: hash_including({})).to_return(forbidden)
+    stub_request(:get, "#{BASE}/market-data/instruments/3001/history/candles/desc/OneDay/1000").to_return(forbidden)
+
+    raw = assert_raises(Provider::Etoro::TransientError) { @provider.fetch_daily_candles(3001, from: Date.new(2026, 1, 5)) }
+    adjusted = assert_raises(Provider::Etoro::TransientError) { @provider.fetch_adjusted_candles(3001, interval: "OneDay") }
+
+    assert_equal [ 403, 403 ], [ raw.status_code, adjusted.status_code ]
+  end
+
+  test "the price endpoints wait out a rate limit" do
+    stub_request(:get, "#{BASE}/market-data/instruments/3001/history/candles/desc/OneDay/1000")
+      .to_return(
+        { status: 429, headers: { "Retry-After" => "7" } },
+        { status: 200, headers: JSON_HEADERS, body: { interval: "OneDay", candles: [ { instrumentId: 3001, candles: [] } ] }.to_json }
+      )
+
+    @provider.expects(:sleep).with(7).once
+
+    assert_equal [], @provider.fetch_adjusted_candles(3001, interval: "OneDay")
+  end
+
+  test "the price endpoints retry an outage, then give up with a transient error" do
+    stub_request(:get, "#{BASE}/data/instruments/3001/candles").with(query: hash_including({})).to_return(status: 503)
+
+    @provider.expects(:sleep).with(2).once
+    @provider.expects(:sleep).with(4).once
+
+    error = assert_raises(Provider::Etoro::TransientError) { @provider.fetch_daily_candles(3001, from: Date.new(2026, 1, 5)) }
+    assert_equal 503, error.status_code
+  end
+
+  test "price requests to one of eToro's quotas are spaced apart" do
+    stub_request(:get, %r{\A#{Regexp.escape(BASE)}/market-data/instruments/300[12]/history/candles/desc/OneDay/1000\z})
+      .to_return(status: 200, headers: JSON_HEADERS, body: { interval: "OneDay", candles: [] }.to_json)
+
+    @provider.expects(:sleep).with { |seconds| seconds.positive? && seconds <= Provider::Etoro::PRICE_REQUEST_INTERVAL }.once
+
+    @provider.fetch_adjusted_candles(3001, interval: "OneDay")
+    @provider.fetch_adjusted_candles(3002, interval: "OneDay")
+  end
+
   private
+
+    def candles_page(results:, next_cursor: nil)
+      {
+        instrumentId: 3001,
+        symbol: "ACME/USD",
+        interval: "1d",
+        side: "bid",
+        pagination: { limit: 2000, hasNext: next_cursor.present?, nextCursor: next_cursor },
+        results: results
+      }.to_json
+    end
 
     def fetch_history
       @provider.fetch_balance_history(account_type: "Trading", account_id: "acc-1", from_date: Date.new(2025, 10, 25), to_date: Date.new(2026, 10, 24))

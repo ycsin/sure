@@ -24,14 +24,17 @@ class EtoroAccount::ActivitiesProcessor
   # carried as cash. The buy of an open position is rewritten on every sync,
   # as a partial close changes it. A stored close, or the stored buy of a
   # fully closed position, is rewritten only when it no longer matches: its
-  # trades go on another security now (see #trade_security_for), it is on
-  # another day, or a buy does not add up to the closes of its position.
+  # trades go on another security now (see DataHelpers#trade_security_for),
+  # it is on another day or on other shares (a split found since, see
+  # #closed_units), or a buy does not add up to the closes of its position.
   #
   # A position can have stored closes its trade history no longer lists, when
   # the account is linked to a new connection whose history starts later.
-  # Those closes and the position's buy keep their stored figures, as the
-  # closes listed are only part of the position, and follow the position
-  # when its trades go on another security.
+  # Those closes keep their stored figures, and follow the position when its
+  # trades go on another security; a split found later leaves them on the
+  # shares they were stored on. The position's buy keeps its stored cost, as
+  # the closes listed are only part of the position, and takes the units of
+  # all its closes and of whatever is still open, so that they add up.
   def process
     return { buys: 0, sells: 0 } unless account.present?
 
@@ -109,12 +112,20 @@ class EtoroAccount::ActivitiesProcessor
       end
     end
 
+    # The units a position's unlisted closes took out, as stored.
+    def unlisted_units(position_id)
+      unlisted_closes.fetch(position_id, []).sum(BigDecimal("0")) { |external_id| -stored_trades[external_id].quantity }
+    end
+
     def buy_stored?(position_id, legs)
       stored = stored_trades[buy_external_id(position_id)]
       return false unless stored
 
       buy = buy_figures(legs[:open], legs[:closed])
-      return stored_as?(stored, buy[:date], instrument_id_of(legs)) if unlisted_closes.key?(position_id)
+      if unlisted_closes.key?(position_id)
+        return stored_as?(stored, buy[:date], instrument_id_of(legs)) &&
+          within?(stored.quantity, buy[:quantity] + unlisted_units(position_id), QUANTITY_TOLERANCE)
+      end
       return false if legs[:open]
 
       stored_as?(stored, buy[:date], instrument_id_of(legs)) &&
@@ -122,9 +133,14 @@ class EtoroAccount::ActivitiesProcessor
         within?(stored.amount, buy[:amount], AMOUNT_TOLERANCE)
     end
 
+    # A stored close is written again when it is now on other shares, as
+    # after a split eToro's prices show since it was imported.
     def sell_stored?(trade)
       stored = stored_trades[sell_external_id(trade)]
-      stored.present? && stored_as?(stored, parse_date(field(trade, "closeTimestamp")), field(trade, "instrumentID"))
+      quantity = closed_units(trade)
+      stored.present? && quantity.present? &&
+        stored_as?(stored, parse_date(field(trade, "closeTimestamp")), field(trade, "instrumentID")) &&
+        within?(stored.quantity, -quantity, QUANTITY_TOLERANCE)
     end
 
     # Whether a stored trade is on the given day and on the security its
@@ -138,35 +154,6 @@ class EtoroAccount::ActivitiesProcessor
     def on_current_security?(stored, instrument_id)
       security = trade_security_for(instrument_id)
       security.nil? || stored.security_id == security.id
-    end
-
-    # The security an instrument's trades go on: the one it resolves to, or
-    # the one a user moved its holding to. Holding#remap_security! takes the
-    # trades along, and the holdings import carries the move to each new
-    # day's holding, so the trades stay with the holding.
-    def trade_security_for(instrument_id)
-      security = security_for_instrument(instrument_id)
-      security && (remapped_securities[security.id] || security)
-    end
-
-    # The securities users moved eToro's holdings to, by the ID of the
-    # security eToro reported each one as. The newest holding of a reported
-    # security decides: the holdings import carries a move to each new day's
-    # holding, and when it does not, the trades go back with the holding.
-    def remapped_securities
-      return {} unless provider_id
-
-      @remapped_securities ||= begin
-        newest = account.holdings
-          .where(account_provider_id: provider_id)
-          .where.not(provider_security_id: nil)
-          .select("DISTINCT ON (holdings.provider_security_id) holdings.provider_security_id, holdings.security_id, holdings.security_locked")
-          .order("holdings.provider_security_id", date: :desc, id: :desc)
-          .to_a
-        moved = newest.select { |holding| holding.security_locked? && holding.security_id != holding.provider_security_id }
-        securities = Security.where(id: moved.map(&:security_id)).index_by(&:id)
-        moved.to_h { |holding| [ holding.provider_security_id, securities[holding.security_id] ] }.compact
-      end
     end
 
     def within?(stored, expected, tolerance)
@@ -208,9 +195,9 @@ class EtoroAccount::ActivitiesProcessor
     end
 
     # Units, cost and opening day of a position's buy, which covers its
-    # closed legs and whatever is still open.
+    # closed legs and whatever is still open, all on today's shares.
     def buy_figures(open, closed)
-      quantity = closed.sum(BigDecimal("0")) { |trade| parse_decimal(field(trade, "units")) || 0 }
+      quantity = closed.sum(BigDecimal("0")) { |trade| closed_units(trade) || 0 }
       amount = closed.sum(BigDecimal("0")) { |trade| parse_decimal(field(trade, "investment")) || 0 }
       if open
         quantity += parse_decimal(field(open, "units")) || 0
@@ -221,10 +208,20 @@ class EtoroAccount::ActivitiesProcessor
       { quantity: quantity, amount: amount, date: date }
     end
 
+    # The units of a closed leg on today's shares. eToro's prices are stored
+    # on today's shares too, and its open positions are restated on them, so
+    # the holdings history counts one share basis throughout. The money is
+    # the same either way: a sell's price moves by the inverse.
+    def closed_units(trade)
+      units = parse_decimal(field(trade, "units"))
+      factor = split_factor_after(field(trade, "instrumentID"), session_date(field(trade, "closeTimestamp")), rate: field(trade, "closeRate"))
+      units && factor != 1 ? Security::Split.scale(units, factor) : units
+    end
+
     def import_buy(position_id, legs)
       buy = buy_figures(legs[:open], legs[:closed])
       stored = stored_trades[buy_external_id(position_id)]
-      buy = buy.merge(quantity: stored.quantity, amount: stored.amount) if stored && unlisted_closes.key?(position_id)
+      buy = buy.merge(quantity: buy[:quantity] + unlisted_units(position_id), amount: stored.amount) if stored && unlisted_closes.key?(position_id)
       return false unless buy[:quantity].positive? && buy[:amount].positive? && buy[:date]
 
       security = trade_security_for(instrument_id_of(legs))
@@ -251,7 +248,7 @@ class EtoroAccount::ActivitiesProcessor
     def import_sell(trade)
       position_id = field(trade, "positionId").to_s
       date = parse_date(field(trade, "closeTimestamp"))
-      quantity = parse_decimal(field(trade, "units"))
+      quantity = closed_units(trade)
       proceeds = (parse_decimal(field(trade, "investment")) || 0) + (parse_decimal(field(trade, "netProfit")) || 0)
       external_id = sell_external_id(trade)
       return false if position_id.blank? || date.nil? || external_id.nil? || quantity.nil? || !quantity.positive?
