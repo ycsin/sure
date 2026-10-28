@@ -43,6 +43,7 @@ When you arrive at the main dashboard, showing **No accounts yet**, you're all s
 > - [**Redbark**](https://github.com/we-promise/sure/blob/main/docs/hosting/redbark.md) (Australian banks)
 > - [**Up**](https://up.com.au/) (Australian bank)
 > - [**Akahu**](https://www.akahu.nz/) (New Zealand banks)
+> - [**moomoo**](https://github.com/we-promise/sure/blob/main/docs/hosting/moomoo.md) (alpha, brokerage holdings and trades)
 > - [**CoinStats**](https://coinstats.app/) (beta, crypto)
 >
 > See **Settings > Bank sync** in your instance for the full list of supported providers and their setup options. Only **admin** users can connect a provider.

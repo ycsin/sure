@@ -259,6 +259,12 @@ module ApplicationHelper
     ENV.fetch("DEV_WEBHOOKS_URL", root_url).chomp("/") + "/enable_banking_items/callback"
   end
 
+  # The redirect URI Sure registers with moomoo. MOOMOO_REDIRECT_URI overrides
+  # it for instances behind a proxy that doesn't forward the public host.
+  def moomoo_callback_url
+    ENV["MOOMOO_REDIRECT_URI"].presence || callback_moomoo_items_url
+  end
+
   # Formats a holding quantity with adaptive precision based on the value size.
   # Shows more decimal places for small quantities (common with crypto).
   #
