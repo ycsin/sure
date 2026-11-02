@@ -50,6 +50,9 @@ class BalanceSheet::NetWorthSeriesBuilder
         user&.id,
         shares_version,
         currency,
+        # Rates arrive without touching entries or accounts; a series built on
+        # the fallback before they did must not outlive them.
+        ExchangeRate.maximum(:updated_at)&.to_i,
         period.start_date,
         period.end_date
       ].compact.join("_")

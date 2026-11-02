@@ -237,6 +237,21 @@ class BalanceSheetTest < ActiveSupport::TestCase
     assert_equal "EUR", balance_sheet.assets.account_groups.first.currency
   end
 
+  test "a net worth series cached before the rates arrived is rebuilt once they do" do
+    Rails.stubs(:cache).returns(ActiveSupport::Cache::MemoryStore.new)
+    period = Period.custom(start_date: 2.days.ago.to_date, end_date: Date.current)
+    account = create_account(balance: 1000, accountable: Depository.new)
+    (period.start_date..period.end_date).each { |date| create_balance(account: account, date: date, balance: 1000) }
+    end_value = -> { BalanceSheet.new(@family, currency: "EUR").net_worth_series(period: period).values.index_by(&:date).fetch(period.end_date).value.amount }
+    assert_equal 1000, end_value.call, "precondition: without a rate the series falls back to 1:1"
+
+    (period.start_date..period.end_date).each do |date|
+      ExchangeRate.create!(from_currency: "USD", to_currency: "EUR", date: date, rate: 0.5)
+    end
+
+    assert_equal 500, end_value.call
+  end
+
   test "an unknown requested currency falls back to the family's" do
     assert_equal @family.currency, BalanceSheet.new(@family, currency: "not-a-currency").currency
   end
