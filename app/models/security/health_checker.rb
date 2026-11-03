@@ -16,6 +16,12 @@ class Security::HealthChecker
   HEALTH_CHECK_INTERVAL = 7.days
   DAILY_BATCH_SIZE = 1000
 
+  # Securities whose prices a connected broker supplies while no price
+  # provider has them. They are checked like any other, so that one a
+  # provider has comes online and the provider's prices take over, but a
+  # failed check neither counts against them nor deletes the broker's prices.
+  BROKER_PRICED_REASONS = [ EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON ].freeze
+
   class << self
     def check_all
       # No daily limit for unchecked securities (they are prioritized)
@@ -114,6 +120,8 @@ class Security::HealthChecker
     end
 
     def handle_failure
+      return if security.offline? && BROKER_PRICED_REASONS.include?(security.offline_reason)
+
       new_failure_count = security.failed_fetch_count.to_i + 1
       new_failure_at = Time.current
 
