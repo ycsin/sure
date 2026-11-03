@@ -571,6 +571,47 @@ class TransactionTest < ActiveSupport::TestCase
     assert_empty scope.category_from("ai", metadata: { confidence: 0.5 }).pluck(:id)
   end
 
+  test "a leg that becomes a plain transfer loses the Investment Contributions category" do
+    transaction = contribution_leg(accounts(:depository))
+
+    transaction.update!(kind: "funds_movement")
+
+    assert_nil transaction.reload.category
+  end
+
+  test "a plain transfer leg keeps a category the user locked, set in the same save, or another category" do
+    family = families(:dylan_family)
+    locked = contribution_leg(accounts(:depository))
+    locked.lock_attr!(:category_id)
+    same_save = contribution_leg(accounts(:depository))
+    same_save.update_columns(category_id: categories(:income).id)
+    other = contribution_leg(accounts(:depository))
+    other.update!(category: categories(:income))
+
+    locked.update!(kind: "funds_movement")
+    same_save.update!(kind: "funds_movement", category: family.investment_contributions_category)
+    other.update!(kind: "funds_movement")
+
+    assert_equal family.investment_contributions_category, locked.reload.category
+    assert_equal family.investment_contributions_category, same_save.reload.category
+    assert_equal categories(:income), other.reload.category
+  end
+
+  test "with_stale_contribution_category finds unlocked plain transfer legs with the category" do
+    stale = contribution_leg(accounts(:depository))
+    stale.update_columns(kind: "funds_movement")
+    locked = contribution_leg(accounts(:depository))
+    locked.update_columns(kind: "funds_movement")
+    locked.lock_attr!(:category_id)
+    contribution = contribution_leg(accounts(:depository))
+
+    found = Transaction.with_stale_contribution_category
+
+    assert_includes found, stale
+    assert_not_includes found, locked
+    assert_not_includes found, contribution
+  end
+
   private
     # Whether each SQL form of "is this transaction pending?" says it is.
     def sql_pending_answers(transaction)
@@ -588,5 +629,12 @@ class TransactionTest < ActiveSupport::TestCase
         "Entry.excluding_pending (pending_check_sql)" => !Entry.excluding_pending.exists?(entry_id),
         "Transaction.pending_providers_sql" => posted_row.nil?
       }
+    end
+
+    def contribution_leg(account)
+      account.entries.create!(
+        name: "To broker", amount: 100, date: Date.current, currency: "USD",
+        entryable: Transaction.new(kind: "investment_contribution", category: account.family.investment_contributions_category)
+      ).transaction
     end
 end

@@ -64,10 +64,15 @@ class Transfer::InvestmentKindReconciler
         !transaction.locked?(:kind)
     end
 
+    # update_columns skips Transaction's callbacks, so the Investment
+    # Contributions category a leg loses with its kind is dropped here.
     def repair!(transaction, kind)
       now = Time.current
+      transaction.kind = kind
+      attributes = { kind: kind, updated_at: now }
+      attributes[:category_id] = nil if transaction.stale_contribution_category?
       Transaction.transaction do
-        transaction.update_columns(kind: kind, updated_at: now)
+        transaction.update_columns(attributes)
         # Report and transaction-list caches are keyed on entries' updated_at.
         transaction.entry.update_columns(updated_at: now)
       end
