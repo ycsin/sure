@@ -276,4 +276,37 @@ namespace :data_migration do
       result.changed.each { |change, count| puts "  #{change}: #{count}" }
     end
   end
+
+  desc "Clear the Investment Contributions category from plain transfer legs"
+  # 2026-11-03: legs that became plain transfers (funds_movement, cc_payment)
+  # through a sync, a match or reconcile_investment_transfer_kinds kept the
+  # Investment Contributions category of their old kind, so they still show
+  # under that category. Clears it unless the user locked the category.
+  # Idempotent.
+  #
+  #   DRY_RUN=1    print what would change without writing
+  #   FAMILY_ID=id limit the run to one family
+  task clear_stale_contribution_categories: :environment do
+    dry_run = ActiveModel::Type::Boolean.new.cast(ENV["DRY_RUN"]) || false
+    scope = Transaction.with_stale_contribution_category
+
+    if ENV["FAMILY_ID"].present?
+      family = Family.find_by(id: ENV["FAMILY_ID"])
+      abort "No family with id #{ENV["FAMILY_ID"]}" unless family
+      scope = scope.where(id: family.transactions.select(:id))
+    end
+
+    count = scope.count
+    unless dry_run
+      now = Time.current
+      Transaction.transaction do
+        entry_ids = Entry.where(entryable_type: "Transaction", entryable_id: scope.select(:id)).pluck(:id)
+        Transaction.where(id: scope.select(:id)).update_all(category_id: nil, updated_at: now)
+        # Report and transaction-list caches are keyed on entries' updated_at.
+        Entry.where(id: entry_ids).update_all(updated_at: now)
+      end
+    end
+
+    puts "#{dry_run ? "Dry run: " : ""}#{count} plain transfer legs #{dry_run ? "would lose" : "lost"} the Investment Contributions category"
+  end
 end

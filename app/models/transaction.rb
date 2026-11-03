@@ -29,6 +29,29 @@ class Transaction < ApplicationRecord
 
   after_save :clear_merchant_unlinked_association, if: :merchant_id_previously_changed?
 
+  # A leg that becomes a plain transfer (funds_movement, cc_payment) is left
+  # uncategorized (see UNCATEGORIZED_EXCLUDED_KINDS), so the Investment
+  # Contributions category its old kind gave it goes with that kind, as in
+  # Transfer#update_investment_contribution!. A category set in the same save,
+  # or one the user locked, stays.
+  before_save :drop_stale_contribution_category,
+              if: -> { will_save_change_to_kind? && !will_save_change_to_category_id? }
+
+  # Plain-transfer legs still carrying an Investment Contributions category
+  # from an older kind, where the user has not locked the category.
+  scope :with_stale_contribution_category, -> {
+    joins(:category)
+      .where(kind: UNCATEGORIZED_EXCLUDED_KINDS, categories: { name: Category.all_investment_contributions_names })
+      .where("transactions.locked_attributes ->> 'category_id' IS NULL")
+  }
+
+  def stale_contribution_category?
+    UNCATEGORIZED_EXCLUDED_KINDS.include?(kind) &&
+      category_id.present? &&
+      !locked?(:category_id) &&
+      Category.all_investment_contributions_names.include?(category&.name)
+  end
+
   # Accessors for exchange_rate stored in extra jsonb field
   def exchange_rate
     extra&.dig("exchange_rate")
@@ -53,6 +76,10 @@ class Transaction < ApplicationRecord
   validate :exchange_rate_must_be_valid
 
   private
+
+    def drop_stale_contribution_category
+      self.category = nil if stale_contribution_category?
+    end
 
     def exchange_rate_must_be_valid
       if extra&.dig("exchange_rate_invalid")
