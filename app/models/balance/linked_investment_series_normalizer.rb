@@ -41,6 +41,34 @@ class Balance::LinkedInvestmentSeriesNormalizer
       new(account: account, series: nil).supported_history_start_date
     end
 
+    # The account's own rows that are history the user supplied: those an
+    # import session brought in, such as statements, and, for a provider that
+    # records where its import starts (StashAway does), every row before that
+    # date, hand-entered ones included. A provider linked to the account later
+    # appends to them, so they belong to its supported history like the
+    # provider's own rows. `import_start_dates` is keyed by account id.
+    def own_activity(entries, import_start_dates = {})
+      rows = entries
+        .excluding_pending
+        .where(source: nil)
+        .where.not(entryable_type: "Valuation")
+
+      kept = rows.where.not(import_id: nil)
+      import_start_dates.each do |account_id, start|
+        kept = kept.or(rows.where(account_id: account_id).where(date: ...start))
+      end
+      kept
+    end
+
+    # Where each account's provider starts importing, for the providers that
+    # record it.
+    def import_start_dates(account_ids)
+      AccountProvider.where(account_id: account_ids).includes(:provider).each_with_object({}) do |link, dates|
+        start = link.provider.try(:import_start_date)
+        dates[link.account_id] = [ dates[link.account_id], start ].compact.min if start
+      end
+    end
+
     private
       def common_supported_history_start_date(account_ids)
         account_ids = Array(account_ids).compact
@@ -53,10 +81,16 @@ class Balance::LinkedInvestmentSeriesNormalizer
           .group(:account_id)
           .minimum(:date)
 
+        # Only a linked account's own rows are history a provider appends to;
+        # a manual account's must not move the group's start.
+        own_dates = own_activity(Entry.where(account_id: Account.linked.where(id: account_ids).select(:id)), import_start_dates(account_ids))
+          .group(:account_id)
+          .minimum(:date)
+
         stable_holding_dates = stable_provider_holding_start_dates(account_ids)
 
         account_ids.filter_map do |account_id|
-          [ activity_dates[account_id], stable_holding_dates[account_id] ].compact.min
+          [ activity_dates[account_id], own_dates[account_id], stable_holding_dates[account_id] ].compact.min
         end.max
       end
 
@@ -90,9 +124,9 @@ class Balance::LinkedInvestmentSeriesNormalizer
   end
 
   # Trims points before supported provider history and aligns the series
-  # inception with the balance before the first provider activity, so a
-  # deposit on the opening day reads as a change in value rather than as
-  # the starting value.
+  # inception with the balance before the first activity, so a deposit on
+  # the opening day reads as a change in value rather than as the starting
+  # value.
   def normalize
     return series unless account.linked? && account.balance_type == :investment
 
@@ -111,9 +145,9 @@ class Balance::LinkedInvestmentSeriesNormalizer
       # the requested series date range.
       active_points = [ opening_point(date: first_supported_history_date, date_formatted: nil, value: opening_money), *active_points ]
     elsif active_points.first.date == first_supported_history_date &&
-          first_provider_activity_date == first_supported_history_date
+          first_activity_date == first_supported_history_date
       # Sampling landed exactly on the opening date (e.g. a daily "All" chart)
-      # and that date is the first provider activity date: the first point
+      # and that date is the first activity date: the first point
       # carries the day's closing balance, which already includes the first
       # activity. Reset it to the balance before that activity (#3959).
       # When the inception date comes from provider holdings rather than
@@ -137,14 +171,15 @@ class Balance::LinkedInvestmentSeriesNormalizer
   end
 
   def supported_history_start_date
-    [ first_provider_activity_date, stable_provider_holding_start_date ].compact.min
+    [ first_activity_date, stable_provider_holding_start_date ].compact.min
   end
 
   private
 
-    # The balance just before the first provider activity: 0 for views that
-    # measure change (gains, holdings), the opening anchor balance for balance
-    # views when the anchor marks the inception date, 0 otherwise.
+    # The balance just before the first supported history: 0 for views that
+    # measure change (gains, holdings); for balance views the opening anchor
+    # balance when the anchor marks the inception date, otherwise the balance
+    # stored for the day before, 0 when none is.
     def opening_amount(first_supported_history_date)
       case view.to_sym
       when :gains, :holdings_balance
@@ -153,11 +188,18 @@ class Balance::LinkedInvestmentSeriesNormalizer
         if account.has_opening_anchor? && first_supported_history_date == account.opening_anchor_date
           account.opening_anchor_balance || 0
         else
-          0
+          balance_before(first_supported_history_date)
         end
       else
         0
       end
+    end
+
+    # The account's end-of-day balance the day before `date`, as the view
+    # measures it; the day's own row already includes its activity.
+    def balance_before(date)
+      column = view.to_sym == :cash_balance ? :cash_balance : :balance
+      account.balances.where(currency: account.currency, date: date.prev_day).pick(column) || 0
     end
 
     def opening_point(date:, date_formatted:, value:)
@@ -179,6 +221,16 @@ class Balance::LinkedInvestmentSeriesNormalizer
       active_points.first&.date == series.values.first&.date &&
         active_points.length == series.values.length &&
         active_points.first&.value == series.values.first&.value
+    end
+
+    def first_activity_date
+      [ first_provider_activity_date, first_own_activity_date ].compact.min
+    end
+
+    def first_own_activity_date
+      return @first_own_activity_date if defined?(@first_own_activity_date)
+
+      @first_own_activity_date = self.class.own_activity(account.entries, self.class.import_start_dates([ account.id ])).minimum(:date)
     end
 
     def first_provider_activity_date

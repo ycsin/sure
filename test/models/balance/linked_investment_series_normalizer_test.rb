@@ -67,6 +67,50 @@ class Balance::LinkedInvestmentSeriesNormalizerTest < ActiveSupport::TestCase
     assert_equal linked_activity_date, start_date
   end
 
+  test "statement rows imported before a provider was linked are supported history" do
+    account = linked_investment_account
+    import = account.family.imports.create!(type: "TransactionImport")
+    statement_date = 90.days.ago.to_date
+    account.entries.create!(date: statement_date, name: "Statement deposit", amount: -1000, currency: "USD", import: import, entryable: Transaction.new)
+    account.entries.create!(date: 10.days.ago.to_date, name: "Deposit", amount: -100, currency: "USD", source: "coinstats", entryable: Transaction.new)
+
+    assert_equal statement_date, Balance::LinkedInvestmentSeriesNormalizer.supported_history_start_date(account)
+    assert_equal statement_date, Balance::LinkedInvestmentSeriesNormalizer.send(:common_supported_history_start_date, [ account.id ])
+  end
+
+  test "hand-entered rows before the import start of a provider that keeps them are supported history" do
+    account = families(:dylan_family).accounts.create!(name: "StashAway General", balance: 0, currency: "SGD", accountable: Investment.new)
+    typed_in_date = 90.days.ago.to_date
+    account.entries.create!(date: typed_in_date, name: "Deposit", amount: -1000, currency: "SGD", entryable: Transaction.new)
+    stashaway_accounts(:general).link_to!(account)
+    account.entries.create!(date: 10.days.ago.to_date, name: "Deposit", amount: -100, currency: "SGD", source: "stashaway", entryable: Transaction.new)
+
+    assert_equal typed_in_date, Balance::LinkedInvestmentSeriesNormalizer.supported_history_start_date(account)
+    assert_equal typed_in_date, Balance::LinkedInvestmentSeriesNormalizer.send(:common_supported_history_start_date, [ account.id ])
+  end
+
+  test "hand-entered rows before a provider that brings its own history are not supported history" do
+    account = linked_investment_account
+    account.entries.create!(date: 90.days.ago.to_date, name: "Deposit", amount: -1000, currency: "USD", entryable: Transaction.new)
+    provider_date = 10.days.ago.to_date
+    account.entries.create!(date: provider_date, name: "Deposit", amount: -100, currency: "USD", source: "coinstats", entryable: Transaction.new)
+
+    assert_equal provider_date, Balance::LinkedInvestmentSeriesNormalizer.supported_history_start_date(account)
+    assert_equal provider_date, Balance::LinkedInvestmentSeriesNormalizer.send(:common_supported_history_start_date, [ account.id ])
+  end
+
+  test "a manual account's imported rows do not move the group's start" do
+    linked_account = linked_investment_account
+    linked_activity_date = 20.days.ago.to_date
+    linked_account.entries.create!(date: linked_activity_date, name: "Deposit", amount: -100, currency: "USD", source: "coinstats", entryable: Transaction.new)
+    manual_account = families(:empty).accounts.create!(name: "Manual Investment", balance: 0, currency: "USD", accountable: Investment.new)
+    import = manual_account.family.imports.create!(type: "TransactionImport")
+    manual_account.entries.create!(date: 5.days.ago.to_date, name: "Imported", amount: -50, currency: "USD", import: import, entryable: Transaction.new)
+
+    assert_equal linked_activity_date, Balance::LinkedInvestmentSeriesNormalizer
+      .send(:common_supported_history_start_date, [ linked_account.id, manual_account.id ])
+  end
+
   test "common_supported_history_start_date returns nil when no accounts have provider history" do
     manual_account = families(:empty).accounts.create!(
       name: "Manual Investment",
@@ -614,4 +658,66 @@ class Balance::LinkedInvestmentSeriesNormalizerTest < ActiveSupport::TestCase
     assert_equal [ holdings_start_date, Date.current ], normalized.values.map(&:date)
     assert_equal Money.new(5000, "USD"), normalized.values.first.value
   end
+
+  test "normalizer resets first point to the balance before the first imported row when the anchor is earlier" do
+    account = linked_investment_account
+    account.set_opening_anchor_balance(balance: 5000, date: 20.days.ago.to_date)
+    statement_date = 10.days.ago.to_date
+    import = account.family.imports.create!(type: "TransactionImport")
+    account.entries.create!(date: statement_date, name: "Statement deposit", amount: -1000, currency: "USD", import: import, entryable: Transaction.new)
+    account.balances.create!(date: statement_date.prev_day, balance: 5000, cash_balance: 5000, currency: "USD")
+
+    raw_series = Series.new(
+      start_date: statement_date,
+      end_date: Date.current,
+      interval: "1 day",
+      values: [
+        Series::Value.new(date: statement_date, date_formatted: "", value: Money.new(6000, "USD")),
+        Series::Value.new(date: 5.days.ago.to_date, date_formatted: "", value: Money.new(6050, "USD")),
+        Series::Value.new(date: Date.current, date_formatted: "", value: Money.new(6100, "USD"))
+      ],
+      favorable_direction: account.favorable_direction
+    )
+
+    normalized = Balance::LinkedInvestmentSeriesNormalizer.new(account: account, series: raw_series).normalize
+
+    assert_equal [ statement_date, 5.days.ago.to_date, Date.current ], normalized.values.map(&:date)
+    assert_equal Money.new(5000, "USD"), normalized.values.first.value
+    assert_equal Money.new(1100, "USD"), normalized.trend.value
+  end
+
+  test "normalizer prepends the balance before the first imported row when coarse sampling misses it" do
+    account = linked_investment_account
+    account.set_opening_anchor_balance(balance: 5000, date: 20.days.ago.to_date)
+    statement_date = 10.days.ago.to_date
+    import = account.family.imports.create!(type: "TransactionImport")
+    account.entries.create!(date: statement_date, name: "Statement deposit", amount: -1000, currency: "USD", import: import, entryable: Transaction.new)
+    account.balances.create!(date: statement_date.prev_day, balance: 5000, cash_balance: 5000, currency: "USD")
+
+    raw_series = Series.new(
+      start_date: 14.days.ago.to_date,
+      end_date: Date.current,
+      interval: "1 week",
+      values: [
+        Series::Value.new(date: 14.days.ago.to_date, date_formatted: "", value: Money.new(5000, "USD")),
+        Series::Value.new(date: 7.days.ago.to_date, date_formatted: "", value: Money.new(6000, "USD")),
+        Series::Value.new(date: Date.current, date_formatted: "", value: Money.new(6100, "USD"))
+      ],
+      favorable_direction: account.favorable_direction
+    )
+
+    normalized = Balance::LinkedInvestmentSeriesNormalizer.new(account: account, series: raw_series).normalize
+
+    assert_equal [ statement_date, 7.days.ago.to_date, Date.current ], normalized.values.map(&:date)
+    assert_equal Money.new(5000, "USD"), normalized.values.first.value
+  end
+
+  private
+
+    def linked_investment_account
+      account = families(:empty).accounts.create!(name: "Linked Investment", balance: 0, currency: "USD", accountable: Investment.new)
+      coinstats_item = account.family.coinstats_items.create!(name: "CoinStats", api_key: "test-key")
+      account.account_providers.create!(provider: coinstats_item.coinstats_accounts.create!(name: "Provider", currency: "USD"))
+      account
+    end
 end
