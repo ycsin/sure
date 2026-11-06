@@ -128,10 +128,11 @@ class EtoroAccount::Processor
       account.sync_later if account.disabled?
     end
 
-    # What the syncs wrote on a copy's account: its eToro entries, and the
-    # reconciliations its anchors of earlier days turned into, which come
-    # after the link, as a manual account's own valuations do not (see
-    # EtoroAccount::BalanceHistoryProcessor#users_valuation_dates).
+    # What the syncs wrote on a copy's account: its eToro entries, among them
+    # the balances recorded by hand that eToro's figures replaced (see
+    # EtoroAccount::BalanceHistoryProcessor), and the reconciliations its
+    # anchors of earlier days turned into, which come after the link. A
+    # balance recorded by hand on a day eToro never reported stays.
     def synced_entries
       reconciliations = account.valuations.reconciliation.where(entries: { created_at: etoro_account.account_provider.created_at.. })
       account.entries.where(source: "etoro").or(account.entries.where(entryable_type: "Valuation", entryable_id: reconciliations.select(:id)))

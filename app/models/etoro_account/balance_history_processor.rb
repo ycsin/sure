@@ -14,17 +14,20 @@ class EtoroAccount::BalanceHistoryProcessor
   # Records eToro's end-of-day equity as reconciliations, which the reverse
   # balance calculator treats as waypoints. eToro reports no deposits,
   # withdrawals or dividends, so these are what keep the balance history true
-  # between trades. Days on or after the current anchor are left to it. The
-  # reconciliations carry the "etoro" source, which tells the account charts
-  # that the history they cover is the provider's. A valuation the account
-  # held before it was linked is the user's figure and stays as it is. Once
-  # linked, a day eToro reports takes eToro's total, as the anchor does; the
-  # account page offers no new balance on a linked account.
+  # between trades. Days on or after the current anchor are left to it, and
+  # so is the opening anchor's day. The reconciliations carry the "etoro"
+  # source, which tells the account charts that the history they cover is
+  # the provider's. A day eToro reports takes eToro's total, also when the
+  # account holds a balance recorded by hand on it, as a manual account does
+  # from before it was linked: eToro's figure is the better one for a day it
+  # reports, and the account page offers no new balance on a linked account.
+  # A balance recorded on a day eToro does not report, as before the first
+  # day it recorded, stays: it is the only figure for that day.
   def process
     return 0 unless account.present?
 
     anchor_date = account.current_anchor_date
-    kept = users_valuation_dates
+    kept = opening_anchor_dates
     past = snapshots.select { |date, _total| date < anchor_date && !kept.include?(date) }
     recorded = account.entries.valuations.where(date: past.map(&:first)).pluck(:date, :amount).to_h
 
@@ -65,14 +68,10 @@ class EtoroAccount::BalanceHistoryProcessor
         .update_all(source: "etoro", updated_at: Time.current)
     end
 
-    # The opening anchor, and the valuations a manual account held before it
-    # was linked to eToro. The anchors a sync rotates into reconciliations
-    # come after the link.
-    def users_valuation_dates
-      linked_at = @etoro_account.account_provider&.created_at
-      users = valuations.where(valuations: { kind: "opening_anchor" })
-      users = users.or(valuations.where("entries.source IS DISTINCT FROM ?", "etoro").where(entries: { created_at: ...linked_at })) if linked_at
-      users.pluck(:date).to_set
+    # The opening anchor's day: the anchor is the account's start, which the
+    # processors fit on their own (see TotalsProcessor.fit_opening_anchor!).
+    def opening_anchor_dates
+      valuations.where(valuations: { kind: "opening_anchor" }).pluck(:date).to_set
     end
 
     def valuations(dates = nil)

@@ -60,7 +60,7 @@ en:
         items:
           item_1: Current positions, including copy-trading, valued in USD
           item_2: Buys and sells of positions closed in the last 12 months
-          item_3: Daily account value for the last 12 months (eToro does not report deposits, withdrawals or dividends)
+          item_3: Daily account value for the last 12 months, replacing a balance recorded by hand on those days (eToro does not report deposits, withdrawals or dividends)
           copies: Each copy portfolio's history starts on the day Sure first recorded it, as eToro reports no past figures of a copy
       status:
         fetching_accounts: Fetching account from eToro...
@@ -74,7 +74,7 @@ en:
         account_summary: "%{account_type} • Balance: %{balance}"
         account_id: "Account ID: %{account_id}"
       link_existing:
-        description: Or link the discovered eToro account to an existing manual investment account.
+        description: Or link the discovered eToro account to an existing manual investment account. eToro's daily value replaces a balance you recorded by hand on a day it reports; your balances on the other days stay.
         manual_account_option: "%{name} (%{balance})"
         select_prompt: Select an account...
       linked_accounts:

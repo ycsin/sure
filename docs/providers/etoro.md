@@ -23,8 +23,10 @@ directly on your behalf.
 1. In Sure, go to **Settings > Bank sync** and find the **eToro** panel.
 2. Paste the public API key and the user key, then save.
 3. The first sync discovers your trading account. Create a new investment account from it,
-   or link it to an existing manual investment account. Balances you recorded on that
-   account before linking it are kept: eToro's daily balance is not recorded on those days.
+   or link it to an existing manual investment account. On a day eToro reports a balance for,
+   its figure replaces one you recorded on that account by hand; a balance you recorded on a
+   day eToro does not report, as before eToro's history begins or before Sure first recorded
+   a copy portfolio, is kept, being the only figure for that day.
 
 ## 3. What Is Imported
 

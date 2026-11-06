@@ -822,22 +822,25 @@ class EtoroAccountProcessorTest < ActiveSupport::TestCase
     assert_equal BigDecimal("1500"), @account.current_anchor_balance
   end
 
-  test "linking a manual account keeps the valuations the user recorded" do
-    opening = @account.entries.create!(date: Date.new(2026, 10, 20), name: "Opening balance", amount: 1000, currency: "USD", entryable: Valuation.new(kind: "opening_anchor"))
+  test "linking a manual account lets eToro's figure replace a balance recorded by hand on a day it reports, and keeps the others" do
+    opening = @account.entries.create!(date: Date.new(2026, 10, 18), name: "Opening balance", amount: 1000, currency: "USD", entryable: Valuation.new(kind: "opening_anchor"))
+    before = @account.entries.create!(date: Date.new(2026, 10, 19), name: "Balance update", amount: 1010, currency: "USD", entryable: Valuation.new(kind: "reconciliation"))
     own = @account.entries.create!(date: Date.new(2026, 10, 22), name: "Balance update", amount: 999, currency: "USD", entryable: Valuation.new(kind: "reconciliation"))
-    [ opening, own ].each { |entry| entry.update_columns(created_at: 2.years.ago) }
+    [ opening, before, own ].each { |entry| entry.update_columns(created_at: 2.years.ago) }
     @etoro_account.update!(raw_balance_history_payload: [
-      { "date" => "2026-10-20", "total" => "1300", "currency" => "USD" },
+      { "date" => "2026-10-18", "total" => "1300", "currency" => "USD" },
       { "date" => "2026-10-22", "total" => "1400", "currency" => "USD" },
       { "date" => "2026-10-23", "total" => "1450", "currency" => "USD" }
     ])
 
     2.times { process }
 
-    assert_equal [ BigDecimal("1000"), nil ], [ opening.reload.amount, opening.source ]
-    assert_equal [ BigDecimal("999"), nil ], [ own.reload.amount, own.source ]
-    assert_equal [ [ Date.new(2026, 10, 23), BigDecimal("1450"), "etoro" ] ],
-      @account.entries.where(source: "etoro", entryable_type: "Valuation").pluck(:date, :amount, :source)
+    assert_equal [ BigDecimal("1000"), nil ], [ opening.reload.amount, opening.source ], "the opening anchor is the account's start"
+    assert_equal [ BigDecimal("1010"), nil ], [ before.reload.amount, before.source ], "a day eToro does not report keeps the balance recorded"
+    assert_equal [ BigDecimal("1400"), "etoro" ], [ own.reload.amount, own.source ]
+    assert_equal [ [ Date.new(2026, 10, 22), BigDecimal("1400") ], [ Date.new(2026, 10, 23), BigDecimal("1450") ] ],
+      @account.entries.where(source: "etoro", entryable_type: "Valuation").order(:date).pluck(:date, :amount)
+    assert_equal 1, @account.entries.where(date: Date.new(2026, 10, 22), entryable_type: "Valuation").count
   end
 
   private
