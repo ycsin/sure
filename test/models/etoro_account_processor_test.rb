@@ -387,6 +387,54 @@ class EtoroAccountProcessorTest < ActiveSupport::TestCase
     assert_equal [ securities(:msft) ], @account.current_holdings.map(&:security)
   end
 
+  test "with its own securities, the trades and holdings move to eToro's own securities, and the securities only they used go" do
+    qrst = Security.create!(ticker: "QRST", name: "Qrst", exchange_operating_mic: "XNYS", offline: true)
+    Security::Price.create!(security: qrst, date: Date.new(2026, 2, 20), price: 310, currency: "USD")
+    Security::Resolver.stubs(:new).with("QRST", exchange_operating_mic: "XNYS").returns(stub(resolve: qrst))
+    describe_instrument(1003, "symbol" => "QRST", "name" => "Qrst", "type_id" => 5, "exchange_id" => 5)
+    @etoro_account.update!(raw_trades_payload: @etoro_account.raw_trades_payload +
+      [ closed_trade(23, 1003, units: 1, investment: 300, net_profit: 10, opened: "2026-02-01T10:00:00Z", closed: "2026-02-20T15:00:00Z") ])
+    process
+    assert_equal [ "AAPL", "QRST" ], @account.trades.map { |trade| trade.security.ticker }.uniq.sort
+
+    @etoro_account.etoro_item.update!(own_securities: true)
+    process
+
+    assert_equal [ "ETORO:AAPL", "ETORO:QRST" ], @account.trades.reload.map { |trade| trade.security.ticker }.uniq.sort
+    assert_equal [ "ETORO:AAPL" ], @account.current_holdings.map { |holding| holding.security.ticker }
+    own = Security.find_by!(ticker: "ETORO:QRST", exchange_operating_mic: "XNYS")
+    assert_equal [ true, EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON, "Qrst" ], [ own.offline?, own.offline_reason, own.name ]
+    assert_not Security.exists?(qrst.id), "the security only eToro's trades used goes"
+    assert_empty Security::Price.where(security_id: qrst.id)
+    assert Security.exists?(securities(:aapl).id), "a security other accounts use stays"
+
+    Security::Price.create!(security: own, date: Date.new(2026, 2, 20), price: 300, currency: "USD")
+    found_again = Security.create!(ticker: "QRST", name: "Qrst", exchange_operating_mic: "XNYS", offline: true)
+    Security::Resolver.stubs(:new).with("QRST", exchange_operating_mic: "XNYS").returns(stub(resolve: found_again))
+    @etoro_account.etoro_item.update!(own_securities: false)
+    process
+
+    assert_equal [ "AAPL", "QRST" ], @account.trades.reload.map { |trade| trade.security.ticker }.uniq.sort
+    assert_not Security.exists?(own.id), "eToro's own security goes with its prices once nothing uses it"
+    assert_nil Security.find_by(ticker: "ETORO:AAPL")
+  end
+
+  test "a security eToro's trades leave stays while another account holds it" do
+    qrst = Security.create!(ticker: "QRST", name: "Qrst", exchange_operating_mic: "XNYS", offline: true)
+    Security::Resolver.stubs(:new).with("QRST", exchange_operating_mic: "XNYS").returns(stub(resolve: qrst))
+    describe_instrument(1003, "symbol" => "QRST", "name" => "Qrst", "type_id" => 5, "exchange_id" => 5)
+    @etoro_account.update!(raw_trades_payload: @etoro_account.raw_trades_payload +
+      [ closed_trade(23, 1003, units: 1, investment: 300, net_profit: 10, opened: "2026-02-01T10:00:00Z", closed: "2026-02-20T15:00:00Z") ])
+    process
+    Holding.create!(account: accounts(:investment), security: qrst, date: Date.current, qty: 1, price: 300, amount: 300, currency: "USD")
+
+    @etoro_account.etoro_item.update!(own_securities: true)
+    process
+
+    assert Security.exists?(qrst.id)
+    assert_equal [ "ETORO:AAPL", "ETORO:QRST" ], @account.trades.reload.map { |trade| trade.security.ticker }.uniq.sort
+  end
+
   test "a rename moves the holdings eToro reported on earlier days to the new security" do
     Security::Resolver.stubs(:new).with("MSFT").returns(stub(resolve: securities(:msft)))
     describe_instrument(1003, "symbol" => "MSFT", "name" => "Microsoft", "type_id" => 5)

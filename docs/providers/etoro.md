@@ -290,6 +290,21 @@ own use (see the terms below).
   answer is made on a later sync, after the other checks, and after three in a row the
   other checks wait for the next sync too, while the prices are still read.
 
+**eToro's own securities.** When your price provider's allowance is small, or you want the
+account valued as eToro values it, tick **Price holdings with eToro only** in the eToro
+panel under **Settings > Bank sync**. Each instrument then becomes a security of the
+connection's own, named `ETORO:SYMBOL` on the listing's venue (`ETORO:ABCD` on Nasdaq,
+`ETORO:LNDA` on London, crypto as `ETORO:XCN`), which no price provider lists: Sure asks no
+provider about it, never health checks it, and prices it from eToro's daily quotes as
+above, whether or not a provider covers the stock. The account and its copy accounts are
+valued at eToro's bid at 17:00 New York time, as eToro's app values them, which on a day
+with news after the exchange closed can differ from the official close. A stock you also
+hold in another account is a separate security there, with its own prices. Changing the
+setting moves the connection's trades and holdings to the other securities on the next
+sync, and the securities they leave go unless another account holds or trades them. The
+setting is off unless you turn it on, and is the connection's, so every account linked to
+it follows it.
+
 eToro's API terms allow its market data for your own use with your own account. Sure
 therefore asks only for the instruments in your account, with your key, uses the prices
 only for the securities that account and its copy accounts alone hold, and deletes them

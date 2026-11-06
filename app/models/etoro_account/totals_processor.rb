@@ -104,9 +104,15 @@ class EtoroAccount::TotalsProcessor
     # or reported for them. A trade the user added stays, with the holdings
     # the next sync works out from it; those count beside the investments, so
     # on the days they cover the cash differs from eToro's by their value.
+    # The securities they leave go when nothing else uses them (see
+    # DataHelpers#discard_unused_securities).
     def remove_position_records!
-      account.entries.where(source: "etoro", entryable_type: "Trade").destroy_all
+      trades = account.entries.where(source: "etoro", entryable_type: "Trade")
+      left = Trade.where(id: trades.select(:entryable_id)).distinct.pluck(:security_id) |
+        account.holdings.where.not(security_id: security.id).distinct.pluck(:security_id)
+      trades.destroy_all
       account.holdings.where.not(security_id: security.id).delete_all
+      discard_unused_securities(left)
     end
 
     # The investments' value by day: eToro's total less its cash on each past

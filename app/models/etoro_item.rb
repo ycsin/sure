@@ -51,7 +51,7 @@ class EtoroItem < ApplicationRecord
     # the sync of the account it rebuilds (see EtoroAccount::Processor),
     # whose first day needs the transfers the main account's pass makes.
     copies, mains = linked_etoro_accounts.includes(account_provider: :account).partition(&:copy?)
-    (mains + copies).each_with_object([]) do |etoro_account, results|
+    results = (mains + copies).each_with_object([]) do |etoro_account, results|
       account = etoro_account.current_account
       next unless account
       next if account.pending_deletion?
@@ -73,6 +73,30 @@ class EtoroItem < ApplicationRecord
         results << { etoro_account_id: etoro_account.id, success: false, error: e.message }
       end
     end
+
+    discard_left_securities
+    results
+  end
+
+  # The securities the connection's accounts have left, as after a change of
+  # own_securities or of how a symbol resolves: those with no units in any
+  # of their holdings, which the holdings import closes with a row of zero
+  # units when eToro stops reporting them and an account shown by its
+  # copies, which keeps no trades, never moves. They go when nothing else
+  # holds or trades them (see EtoroAccount::DataHelpers.discard_unused_securities).
+  def discard_left_securities
+    account_ids = accounts.map(&:id)
+    left = Holding.where(account_id: account_ids).group(:security_id).having("BOOL_AND(holdings.qty = 0)").pluck(:security_id)
+    EtoroAccount::DataHelpers.discard_unused_securities(left, accounts: account_ids)
+  rescue => e
+    DebugLogEntry.capture(
+      category: "sync",
+      level: "warn",
+      message: "EtoroItem #{id} - Failed to let go of the securities its accounts left: #{e.class} - #{e.message}",
+      source: "etoro",
+      family: family,
+      provider_key: "etoro"
+    )
   end
 
   def schedule_account_syncs(parent_sync: nil, window_start_date: nil, window_end_date: nil)

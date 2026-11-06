@@ -22,6 +22,11 @@ class Security::HealthChecker
   # failed check neither counts against them nor deletes the broker's prices.
   BROKER_PRICED_REASONS = [ EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON ].freeze
 
+  # The namespaces of the securities a connected broker keeps as its own,
+  # which no provider lists: a check could only fail, and cost the provider a
+  # request (see EtoroAccount::DataHelpers#own_security).
+  BROKER_OWN_TICKER_PREFIXES = [ EtoroAccount::DataHelpers::OWN_TICKER_PREFIX ].freeze
+
   class << self
     def check_all
       # No daily limit for unchecked securities (they are prioritized)
@@ -38,15 +43,21 @@ class Security::HealthChecker
     private
       # If a security has never had a health check, we prioritize it, regardless of batch size
       def never_checked_scope
-        Security.standard.where(last_health_check_at: nil)
+        checkable_scope.where(last_health_check_at: nil)
       end
 
       # Any securities not checked for 30 days are due
       # We only process the batch size, which means some "due" securities will not be checked today
       # This is by design, to prevent all securities from coming due at the same time
       def due_for_check_scope
-        Security.standard.where(last_health_check_at: ..HEALTH_CHECK_INTERVAL.ago)
-                         .order(last_health_check_at: :asc)
+        checkable_scope.where(last_health_check_at: ..HEALTH_CHECK_INTERVAL.ago)
+                       .order(last_health_check_at: :asc)
+      end
+
+      def checkable_scope
+        BROKER_OWN_TICKER_PREFIXES.reduce(Security.standard) do |scope, prefix|
+          scope.where.not("UPPER(securities.ticker) LIKE ?", "#{Security.sanitize_sql_like(prefix.upcase)}%")
+        end
       end
   end
 

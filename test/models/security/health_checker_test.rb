@@ -83,6 +83,17 @@ class Security::HealthCheckerTest < ActiveSupport::TestCase
     assert_not_nil etoro_priced.last_health_check_at
   end
 
+  test "a security in a broker's own namespace is never checked" do
+    own = Security.create!(ticker: "ETORO:OWN", offline: true, offline_reason: EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON, last_health_check_at: nil)
+    due = Security.create!(ticker: "etoro:due", offline: true, last_health_check_at: 20.days.ago)
+    @provider.stubs(:fetch_security_price).returns(provider_error_response(StandardError.new("No prices found")))
+
+    Security::HealthChecker.check_all
+
+    assert_nil own.reload.last_health_check_at
+    assert_equal 20.days.ago.to_date, due.reload.last_health_check_at.to_date
+  end
+
   test "a security eToro supplies the prices of comes online once the price provider has it" do
     etoro_priced = Security.create!(ticker: "ETORO_FOUND", offline: true, offline_reason: EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON, last_health_check_at: nil)
     @provider.stubs(:fetch_security_price).returns(provider_success_response(OpenStruct.new(price: 100, date: Date.current, currency: "USD")))

@@ -25,6 +25,35 @@ class EtoroItemsControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "create saves the own securities preference" do
+    post etoro_items_url, params: { etoro_item: { api_key: "new_public_key", user_key: "new_user_key", own_securities: "1" } }
+
+    assert EtoroItem.order(:created_at).last.own_securities?
+  end
+
+  test "update saves the own securities preference, keeps the keys and syncs the connection" do
+    assert_not @item.own_securities?
+
+    assert_enqueued_with(job: SyncJob) do
+      patch etoro_item_url(@item), params: { etoro_item: { api_key: "", user_key: "", own_securities: "1" } }
+    end
+
+    @item.reload
+    assert @item.own_securities?
+    assert_equal [ "test_public_key", "test_user_key" ], [ @item.api_key, @item.user_key ]
+  end
+
+  test "the panel offers the own securities preference for each connection and for a new one" do
+    @item.update!(own_securities: true)
+    connections = @item.family.etoro_items.count
+
+    post sync_etoro_item_url(@item, source: "panel"), as: :turbo_stream
+
+    assert_select "input[type=checkbox][name='etoro_item[own_securities]'][checked]", count: 1
+    assert_select "input[type=checkbox][name='etoro_item[own_securities]']:not([checked])", count: connections
+    assert_select "label", text: I18n.t("settings.providers.etoro_panel.own_securities_label"), count: connections + 1
+  end
+
   test "update keeps keys left blank" do
     patch etoro_item_url(@item), params: { etoro_item: { api_key: "rotated_public_key", user_key: "" } }
 

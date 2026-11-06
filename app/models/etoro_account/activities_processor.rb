@@ -61,6 +61,9 @@ class EtoroAccount::ActivitiesProcessor
       end
     end
 
+    # Once the trades have moved, the securities they left may be unused.
+    discard_unused_securities(@left_security_ids) if @left_security_ids.present?
+
     { buys: buys, sells: sells }
   end
 
@@ -314,6 +317,7 @@ class EtoroAccount::ActivitiesProcessor
       moves, split = movable_securities
       return if moves.empty? && split.empty?
 
+      @left_security_ids = moves.keys + split
       account.holdings.where(security_id: split, account_provider_id: nil).delete_all if split.any?
       moves.each { |old_id, new_id| Holding.transaction { move_holdings(old_id, new_id) } }
 

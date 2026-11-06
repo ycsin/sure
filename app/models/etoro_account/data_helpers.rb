@@ -5,6 +5,11 @@ module EtoroAccount::DataHelpers
   # shared CRYPTO:<SYMBOL> securities rather than to an exchange listing.
   CRYPTO_TYPE_ID = 10
 
+  # The namespace of the securities a connection keeps as eToro's own (see
+  # #own_security), and of the placeholders for instruments without a
+  # symbol. No price provider lists a ticker in it.
+  OWN_TICKER_PREFIX = "ETORO:".freeze
+
   # The instrument types eToro settles as owned assets: stocks, ETFs and
   # crypto. Currencies (1), commodities (2) and indices (4) are CFDs only.
   REAL_ASSET_TYPE_IDS = [ 5, 6, CRYPTO_TYPE_ID ].freeze
@@ -37,6 +42,39 @@ module EtoroAccount::DataHelpers
   # Suffixes eToro adds to US listings that are not part of the ticker, as in
   # ABCD.RTH, EFGH.US and IJKL.CH.
   US_LISTING_SUFFIXES = %w[RTH US CH].freeze
+
+  class << self
+    # Securities eToro's trades and holdings have left, as after a change of
+    # EtoroItem#own_securities or of how a symbol resolves, go when nothing
+    # holds or trades them any more: left behind, an online one costs the
+    # price provider a details request on every market-data run and an
+    # offline one a health check, and one of eToro's own is of no use to
+    # anyone else. A holding of zero units in one of `accounts` does not
+    # count as holding it: the holdings import closes a holding eToro
+    # stopped reporting with one, and the balances carry it over the days
+    # before, so such rows go with the security, as do its prices. A holding
+    # a user moved to another security keeps the one it was reported as, and
+    # one something took up meanwhile stays.
+    def discard_unused_securities(security_ids, accounts: [])
+      account_ids = Array(accounts).map { |account| account.respond_to?(:id) ? account.id : account }
+
+      Security.where(id: Array(security_ids).uniq).where.not(kind: "cash").find_each do |security|
+        next if Trade.exists?(security_id: security.id)
+        next if Holding.where(provider_security_id: security.id).where.not(security_id: security.id).exists?
+
+        rows = Holding.where(security_id: security.id)
+        next if rows.where.not(qty: 0).or(rows.where.not(account_id: account_ids)).exists?
+
+        Security.transaction do
+          rows.delete_all
+          Security::Price.where(security_id: security.id).delete_all
+          security.destroy!
+        end
+      rescue ActiveRecord::InvalidForeignKey, ActiveRecord::RecordNotDestroyed
+        next
+      end
+    end
+  end
 
   # Venue suffixes eToro appends to non-US symbols ("LNDA.L", "NOPQ.DE"), for
   # instruments whose exchangeID has no MIC above.
@@ -270,6 +308,7 @@ module EtoroAccount::DataHelpers
       name = instrument["name"]
       symbol = instrument["symbol"].to_s.strip.upcase
       return offline_security("ETORO:#{instrument_id}", name) if symbol.blank?
+      return own_security(symbol, instrument, name) if own_securities?
 
       if instrument["type_id"].to_i == CRYPTO_TYPE_ID
         return Onchain::SecurityResolver.resolve(symbol: symbol, name: name) || offline_security("ETORO:#{instrument_id}", name)
@@ -367,6 +406,38 @@ module EtoroAccount::DataHelpers
 
     def mic_country(mic)
       Security::EXCHANGES.dig(mic.to_s.upcase, "country") if mic.present?
+    end
+
+    # Whether the connection keeps eToro's instruments as securities of its
+    # own (EtoroItem#own_securities), apart from the securities the price
+    # providers and the other accounts share.
+    def own_securities?
+      @etoro_account&.etoro_item&.own_securities? || false
+    end
+
+    # The connection's own security for an instrument: the listing eToro's
+    # symbol stands for, named in eToro's namespace (ETORO:ABCD on Nasdaq,
+    # ETORO:LNDA on London, crypto as ETORO:XCN), which no price provider
+    # lists, so that none is asked about it, no health check brings it
+    # online and only eToro prices it (see EtoroItem::PriceHistoryImporter).
+    # It is created offline with eToro's pricing reason, and keeps the venue
+    # and country of the listing. The lines eToro lists beside a listing
+    # (ABCD.RTH) resolve to the listing's security, as they do otherwise.
+    def own_security(symbol, instrument, name)
+      ticker, mic = instrument["type_id"].to_i == CRYPTO_TYPE_ID ? [ symbol, nil ] : listing(symbol, instrument["exchange_id"])
+      security = Security.find_or_initialize_by_ticker_and_exchange(ticker: "#{OWN_TICKER_PREFIX}#{ticker}", exchange_operating_mic: mic)
+      if security.new_record?
+        security.offline = true
+        security.offline_reason = EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON
+        security.country_code = mic_country(mic)
+      end
+      security.name = name.presence || ticker if security.name.blank?
+      security.save! if security.changed?
+      security
+    end
+
+    def discard_unused_securities(security_ids)
+      EtoroAccount::DataHelpers.discard_unused_securities(security_ids, accounts: [ account ])
     end
 
     # The resolver saves the match it found. One in another country is not

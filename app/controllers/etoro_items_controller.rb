@@ -275,6 +275,6 @@ class EtoroItemsController < ApplicationController
     end
 
     def etoro_item_params
-      params.require(:etoro_item).permit(:api_key, :user_key)
+      params.require(:etoro_item).permit(:api_key, :user_key, :own_securities)
     end
 end

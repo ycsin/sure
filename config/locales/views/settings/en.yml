@@ -818,6 +818,8 @@ en:
         disconnect_confirm: Disconnect eToro?
         default_account_name: eToro Account
         add_account: Add another account
+        own_securities_label: Price holdings with eToro only
+        own_securities_hint: Each eToro instrument becomes a security of its own, named ETORO:SYMBOL and priced from eToro's daily quotes, so no price provider is asked about it. A stock you also hold in another account is a separate security there. Changing this moves the connection's trades and holdings on the next sync.
       trading212_panel:
         steps:
           step_1: Go to Trading 212 → Settings → API (web or mobile app).

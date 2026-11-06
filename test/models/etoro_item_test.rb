@@ -14,6 +14,47 @@ class EtoroItemTest < ActiveSupport::TestCase
     assert_not @item.credentials_configured?
   end
 
+  test "process_accounts lets go of the securities its accounts left, with their rows of zero units" do
+    account = accounts(:investment)
+    etoro_accounts(:main_account).ensure_account_provider!(account)
+    EtoroAccount::Processor.any_instance.stubs(:process).returns({ holdings: 0, failed_records: 0 })
+    left = Security.create!(ticker: "LEFT", exchange_operating_mic: "XNAS", offline: true)
+    Security::Price.create!(security: left, date: Date.current, price: 10, currency: "USD")
+    held = Security.create!(ticker: "HELD", exchange_operating_mic: "XNAS", offline: true)
+    shared = Security.create!(ticker: "SHRD", exchange_operating_mic: "XNAS", offline: true)
+    row = ->(security, acct, qty, date = Date.current) { Holding.create!(account: acct, security: security, date: date, qty: qty, price: 10, amount: qty * 10, currency: "USD") }
+    row.call(left, account, 0, Date.current - 1)
+    row.call(left, account, 0)
+    row.call(held, account, 0, Date.current - 1)
+    row.call(held, account, 3)
+    row.call(shared, account, 0)
+    row.call(shared, accounts(:crypto), 0)
+
+    @item.process_accounts
+
+    assert_not Security.exists?(left.id)
+    assert_empty Holding.where(security_id: left.id)
+    assert_empty Security::Price.where(security_id: left.id)
+    assert Security.exists?(held.id)
+    assert_equal 2, Holding.where(security_id: held.id).count
+    assert Security.exists?(shared.id), "a row of zero units in another account keeps the security"
+    assert_equal 2, Holding.where(security_id: shared.id).count
+  end
+
+  test "process_accounts keeps a security a user moved a holding away from" do
+    account = accounts(:investment)
+    etoro_accounts(:main_account).ensure_account_provider!(account)
+    EtoroAccount::Processor.any_instance.stubs(:process).returns({ holdings: 0, failed_records: 0 })
+    reported = Security.create!(ticker: "RPTD", exchange_operating_mic: "XNAS", offline: true)
+    Holding.create!(account: account, security: reported, date: Date.current - 1, qty: 0, price: 10, amount: 0, currency: "USD")
+    chosen = Security.create!(ticker: "CHSN", exchange_operating_mic: "XNAS", offline: true)
+    Holding.create!(account: account, security: chosen, provider_security: reported, security_locked: true, date: Date.current, qty: 2, price: 10, amount: 20, currency: "USD")
+
+    @item.process_accounts
+
+    assert Security.exists?(reported.id)
+  end
+
   test "process_accounts skips accounts that are disabled or being deleted" do
     account = accounts(:investment)
     etoro_accounts(:main_account).ensure_account_provider!(account)

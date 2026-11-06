@@ -7,6 +7,7 @@ class EtoroDataHelpersTest < ActiveSupport::TestCase
     include EtoroAccount::DataHelpers
 
     attr_reader :instruments_map
+    attr_writer :etoro_account
 
     def initialize(instruments_map)
       @instruments_map = instruments_map
@@ -201,7 +202,66 @@ class EtoroDataHelpersTest < ActiveSupport::TestCase
     assert_nil Host.new({}).security(4242)
   end
 
+  test "with its own securities, a US stock becomes eToro's own security on its exchange, no provider asked" do
+    Security::Resolver.expects(:new).never
+    Security.expects(:search_provider).never
+    host = own_host("1" => { "symbol" => "AAPL", "name" => "Apple Inc", "type_id" => 5, "exchange_id" => 4 })
+
+    own = host.security(1)
+
+    assert_equal [ "ETORO:AAPL", "XNAS", "US", "Apple Inc" ], [ own.ticker, own.exchange_operating_mic, own.country_code, own.name ]
+    assert own.offline?
+    assert_equal EtoroAccount::PriceHistoryProcessor::OFFLINE_REASON, own.offline_reason
+    assert_nil own.price_provider
+    assert EtoroAccount::PriceHistoryProcessor.priceable?(own)
+    assert_equal securities(:aapl), Security.find_by(ticker: "AAPL", exchange_operating_mic: "XNAS"), "the shared security stays as it was"
+  end
+
+  test "with its own securities, a venue line keeps its venue, and the lines eToro lists beside a listing resolve to the listing's own security" do
+    host = own_host(
+      "1" => { "symbol" => "LNDA.L", "name" => "Londa Group", "type_id" => 5, "exchange_id" => 7 },
+      "2" => { "symbol" => "ABCD", "type_id" => 5, "exchange_id" => 4 },
+      "3" => { "symbol" => "ABCD.RTH", "type_id" => 5, "exchange_id" => 33 }
+    )
+
+    londa = host.security(1)
+    assert_equal [ "ETORO:LNDA", "XLON", "GB" ], [ londa.ticker, londa.exchange_operating_mic, londa.country_code ]
+    assert_equal host.security(2), host.security(3)
+    assert_equal "ETORO:ABCD", host.security(2).ticker
+  end
+
+  test "with its own securities, crypto is eToro's own too, apart from the shared crypto security" do
+    host = own_host("1" => { "symbol" => "XCN", "name" => "Examplecoin", "type_id" => 10 })
+
+    coin = host.security(1)
+
+    assert_equal [ "ETORO:XCN", nil, "Examplecoin" ], [ coin.ticker, coin.exchange_operating_mic, coin.name ]
+    assert coin.offline?
+    assert_not coin.crypto?
+    assert_nil Security.find_by(ticker: "CRYPTO:XCN")
+  end
+
+  test "an own security is reused with its name, and an instrument without a symbol still gets its placeholder" do
+    existing = Security.create!(ticker: "ETORO:ABCD", name: "Abcd, as named", exchange_operating_mic: "XNAS", offline: true)
+    host = own_host(
+      "1" => { "symbol" => "ABCD", "name" => "Abcd Inc", "type_id" => 5, "exchange_id" => 4 },
+      "2" => { "name" => "Some Fund", "type_id" => 6 }
+    )
+
+    assert_equal existing, host.security(1)
+    assert_equal "Abcd, as named", existing.reload.name
+    assert_equal "ETORO:2", host.security(2).ticker
+  end
+
   private
+
+    def own_host(instruments)
+      etoro_account = etoro_accounts(:main_account)
+      etoro_account.etoro_item.update!(own_securities: true)
+      host = Host.new(instruments)
+      host.etoro_account = etoro_account
+      host
+    end
 
     def security(instrument, id: 1)
       Host.new(id.to_s => instrument).security(id)

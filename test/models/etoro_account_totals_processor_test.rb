@@ -120,6 +120,19 @@ class EtoroAccountTotalsProcessorTest < ActiveSupport::TestCase
     assert_equal Date.new(2026, 10, 19), Account.find(@account.id).opening_anchor_date
   end
 
+  test "switching to totals lets go of the securities only eToro's trades used" do
+    @etoro_account.etoro_item.update!(own_securities: true)
+    process
+    own = Security.find_by!(ticker: "ETORO:AAPL")
+    assert @account.trades.any?
+
+    @etoro_account.update!(display_mode: :totals)
+    process
+
+    assert_not Security.exists?(own.id)
+    assert Security.exists?(securities(:aapl).id)
+  end
+
   test "moving the opening anchor queues no sync of the account" do
     process
     @etoro_account.update!(display_mode: :totals)
