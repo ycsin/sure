@@ -36,15 +36,18 @@
     <% end %>
     <%= render DS::Tooltip.new(placement: "top", html_class: "min-w-0") do |tooltip| %>
       <% tooltip.with_trigger do %>
+        <%# The focusable element itself names the tooltip as its description:
+            an ancestor's aria-describedby is not announced for it. %>
         <% if match.links_to_transfer? %>
           <%= link_to transfer_path(match.transfer),
                 class: "flex items-center rounded-full hover:opacity-80 focus-ring",
+                aria: { describedby: tooltip.tooltip_id },
                 data: { turbo_frame: "drawer", turbo_prefetch: false } do %>
             <%= pills %>
           <% end %>
         <% else %>
           <%# Its own tab stop, so keyboard users can open the tooltip. %>
-          <span class="flex items-center rounded-full focus-ring" tabindex="0"><%= pills %></span>
+          <span class="flex items-center rounded-full focus-ring" tabindex="0" aria-describedby="<%= tooltip.tooltip_id %>"><%= pills %></span>
         <% end %>
       <% end %>
       <% if match.counterpart_visible? %>

@@ -117,6 +117,9 @@ class TransactionsControllerTest < ActionDispatch::IntegrationTest
     # The amount is blurred in privacy mode, which a native title would escape.
     assert_select "#{match} [role=tooltip] span.privacy-sensitive", text: "$320.00"
     assert_select "#{match} [title*='320']", count: 0
+    # The link, which takes focus, is described by the tooltip itself.
+    tooltip_id = css_select("#{match} [role=tooltip]").first["id"]
+    assert_select "#{match} a[href='#{transfer_path(transfer)}'][aria-describedby=?]", tooltip_id
 
     # The index shows one leg of a pair; the other leg's row is on its own account's page.
     get account_url(accounts(:credit_card))
@@ -140,6 +143,7 @@ class TransactionsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#{match} [role=tooltip]", text: I18n.t("transactions.transfer_match.auto_matched_tooltip_hidden")
     assert_select "#{match} a[href='#{transfer_path(transfer)}']", count: 0
     assert_select "#{match} span[tabindex='0'] [data-testid='transfer-match-pill']", minimum: 1
+    assert_select "#{match} span[tabindex='0'][aria-describedby=?]", css_select("#{match} [role=tooltip]").first["id"]
     assert_select match, text: /#{Regexp.escape(accounts(:investment).name)}/, count: 0
   end
 
