@@ -104,14 +104,19 @@ class StashawayAccount::Processor
     # Rows the user edited or excluded stay, but a returns row that only
     # follows the plan goes with its month, as it would otherwise stand at a
     # figure the plan no longer has.
+    #
+    # Only rows from the import's start on are the plan's to remove: the
+    # plan has none before it, and the StashAway rows there are history an
+    # earlier link imported, as when an account is linked again after an
+    # entry from another source was added.
     def remove_unplanned_entries(entries)
       planned_ids = entries.map(&:external_id)
 
-      account.entries
+      scope = account.entries
         .where(source: StashawayAccount::SOURCE)
         .where("entries.external_id IS NULL OR entries.external_id NOT IN (?)", planned_ids.presence || [ "" ])
-        .reject { |entry| entry.protected_from_sync? && !returns_row_following_plan?(entry) }
-        .each(&:destroy!)
+      scope = scope.where("entries.date >= ?", start) if start
+      scope.reject { |entry| entry.protected_from_sync? && !returns_row_following_plan?(entry) }.each(&:destroy!)
     end
 
     # Without waypoints: the history between month ends is the entries'

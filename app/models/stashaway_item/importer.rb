@@ -33,7 +33,10 @@ class StashawayItem::Importer
     # StashAway lists any more; failing that, a new account. The accounts are
     # looked up outside the item's association: a new account for portfolios
     # that turn out to have nothing to import must not stay in the item's
-    # unsaved records, where it would fail the item's next save.
+    # unsaved records, where it would fail the item's next save. An account
+    # none of whose portfolios StashAway lists any more is imported too, with
+    # no listed portfolios, so it keeps its stored detail as unlisted and its
+    # portfolios' disappearance is logged.
     def assign(goals)
       accounts = StashawayAccount.where(stashaway_item: stashaway_item).order(:created_at).to_a
       holder = {}
@@ -48,6 +51,7 @@ class StashawayItem::Importer
           accounts.push(StashawayAccount.new(stashaway_item: stashaway_item, group_key: key)).last
         (groups[account] ||= []) << goal
       end
+      accounts.each { |account| groups[account] ||= [] if account.persisted? && account.goal_ids.any? }
       groups
     end
 
@@ -64,30 +68,33 @@ class StashawayItem::Importer
       goals.sort_by { |goal| [ STATE_ORDER.index(goal["state"]) || STATE_ORDER.size, goal["displayName"].to_s.strip ] }
     end
 
+    # An account with no listed portfolio keeps its name, type and currency.
     def import_group(stashaway_account, goals)
       lead = goals.first
-      currency = lead["currency"].presence || stashaway_item.family.currency
+      currency = lead&.dig("currency").presence || stashaway_account.currency.presence || stashaway_item.family.currency
       value_currency = stashaway_account.current_account&.currency || currency
       stored = stashaway_account.goals.index_by { |goal| goal["id"] }
 
-      records = goals.map { |goal| goal_record(goal, [ value_currency, currency ], stored) }
+      records = goals.map { |goal| goal_record(goal, [ value_currency, currency ], stored, stashaway_account) }
       return false if stashaway_account.new_record? && records.none? { |record| importable?(record) }
 
-      records += unlisted_records(stored, records)
+      records += unlisted_records(stored, records, stashaway_account)
 
       plan = StashawayAccount::EntryPlan.new(goals: records, currency: currency).build
       # A plan with no usable value has no valuation to offer; the last one
       # stays for the setup and link dialogs while the new detail is stored.
       valuation = plan.applicable ? { current_balance: plan.final_nav, last_nav_date: plan.last_nav_date } : {}
-      stashaway_account.update!(
-        group_key: group_key(lead),
-        name: lead["displayName"].to_s.strip.presence || I18n.t("stashaway_items.defaults.name"),
-        goal_type: lead["goalType"],
-        funding_source: lead["fundingSource"],
-        currency: currency,
-        raw_goals_payload: records,
-        **valuation
-      )
+      described = if lead
+        {
+          group_key: group_key(lead),
+          name: lead["displayName"].to_s.strip.presence || I18n.t("stashaway_items.defaults.name"),
+          goal_type: lead["goalType"],
+          funding_source: lead["fundingSource"]
+        }
+      else
+        {}
+      end
+      stashaway_account.update!(**described, currency: currency, raw_goals_payload: records, **valuation)
       true
     end
 
@@ -99,7 +106,7 @@ class StashawayItem::Importer
     # a closed portfolio, and may fail to serve one it still lists. Such a
     # portfolio keeps the detail stored for it last, marked unavailable, so
     # the account keeps its history; one never stored stays empty.
-    def goal_record(goal, value_currencies, stored)
+    def goal_record(goal, value_currencies, stored, stashaway_account)
       record = {
         "id" => goal["_id"].to_s,
         "name" => goal["displayName"].to_s.strip,
@@ -122,13 +129,13 @@ class StashawayItem::Importer
 
       record
     rescue Provider::Stashaway::NotFound => e
-      report_unavailable(record, e)
+      report_unavailable(record, e, stashaway_account)
       unavailable_record(record, stored, "not found")
     rescue Provider::Stashaway::ApiError => e
       # One portfolio's failure keeps its stored detail while the rest import.
       # A refused sign-in is an AuthenticationError, not an ApiError, and
       # still fails the sync.
-      report_unavailable(record, e)
+      report_unavailable(record, e, stashaway_account)
       unavailable_record(record, stored, "error")
     end
 
@@ -145,35 +152,36 @@ class StashawayItem::Importer
     # detail stored for it last, like one StashAway stops serving detail
     # for: dropping it would drop its rows and re-anchor the balance without
     # it. Its disappearance is logged once.
-    def unlisted_records(stored, records)
+    def unlisted_records(stored, records, stashaway_account)
       listed = records.map { |record| record["id"] }
       stored.values.reject { |last| listed.include?(last["id"]) }.map do |last|
-        report_unlisted(last) unless last["unavailable"] == "unlisted"
+        report_unlisted(last, stashaway_account) unless last["unavailable"] == "unlisted"
         last.merge("unavailable" => "unlisted")
       end
     end
 
-    def report_unlisted(record)
-      DebugLogEntry.capture(
-        category: "sync",
-        level: "warn",
-        message: "StashAway no longer lists portfolio #{record["id"]} (#{record["name"]}); the detail stored for it last is used",
-        source: "stashaway",
-        family: stashaway_item.family,
-        provider_key: "stashaway",
-        metadata: { goal_id: record["id"], state: record["state"] }
-      )
+    def report_unlisted(record, stashaway_account)
+      report_portfolio(record, stashaway_account,
+        "StashAway no longer lists portfolio #{record["id"]} (#{record["name"]}); the detail stored for it last is used")
     end
 
-    def report_unavailable(record, error)
+    def report_unavailable(record, error, stashaway_account)
+      report_portfolio(record, stashaway_account,
+        "StashAway portfolio #{record["id"]} (#{record["name"]}): #{error.class} - #{error.message}; the detail stored for it last is used")
+    end
+
+    # Tied to the linked account when there is one, so the entry can be
+    # traced to it.
+    def report_portfolio(record, stashaway_account, message)
       DebugLogEntry.capture(
         category: "sync",
         level: "warn",
-        message: "StashAway portfolio #{record["id"]} (#{record["name"]}): #{error.class} - #{error.message}; the detail stored for it last is used",
+        message: message,
         source: "stashaway",
         family: stashaway_item.family,
+        account_provider: stashaway_account.account_provider,
         provider_key: "stashaway",
-        metadata: { goal_id: record["id"], state: record["state"] }
+        metadata: { goal_id: record["id"], state: record["state"], stashaway_account_id: stashaway_account.id }
       )
     end
 

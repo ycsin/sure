@@ -129,6 +129,7 @@ class StashawayItemsControllerTest < ActionDispatch::IntegrationTest
     get connect_form_settings_providers_path(provider_key: "stashaway")
 
     assert_response :success
+    assert_select "#stashaway-providers-panel details summary span.overflow-hidden.shrink-0", minimum: 1, message: "the connection row shows the provider logo"
     assert_select "turbo-frame#stashaway-connect-form form[action=?] input[type=password]", login_stashaway_item_path(@item)
     assert_select "turbo-frame#stashaway-connect-form form[action=?]", stashaway_items_path
     assert_select "turbo-frame#stashaway-connect-form input[type=password]", 2 do |inputs|

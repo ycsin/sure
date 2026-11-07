@@ -140,6 +140,13 @@ class Provider::StashawayTest < ActiveSupport::TestCase
     assert_not_requested(:post, "#{BASE}/graphql/transactions") { |req| JSON.parse(req.body).dig("variables", "page") == 2 }
   end
 
+  test "a goals answer without the list is an error, not a connection without portfolios" do
+    stub_request(:post, "#{BASE}/graphql/goals").to_return(status: 200, body: { data: {} }.to_json, headers: JSON_HEADERS)
+
+    error = assert_raises(Provider::Stashaway::ApiError) { @provider.goals }
+    assert_match "without a goal list", error.message
+  end
+
   test "a transactions answer without a list or a count is an error, not an empty list" do
     stub_request(:post, "#{BASE}/graphql/transactions")
       .with { |req| JSON.parse(req.body).dig("variables", "page") == 0 }

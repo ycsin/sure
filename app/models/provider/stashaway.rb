@@ -139,8 +139,14 @@ class Provider::Stashaway
     false
   end
 
+  # An answer without the list is an error, not a connection without
+  # portfolios: taken as empty, it would leave the accounts on their last
+  # values with nothing to say why.
   def goals
-    Array(graphql("/goals", GOALS_QUERY)["goals"])
+    list = graphql("/goals", GOALS_QUERY)["goals"]
+    raise ApiError.new("StashAway /goals answered without a goal list", status_code: 200) unless list.is_a?(Array)
+
+    list
   end
 
   # Every grouped transaction item of a goal, in StashAway's order. Pages

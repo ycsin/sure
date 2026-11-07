@@ -3,22 +3,25 @@
   <%= render DS::Disclosure.new(variant: :card, open: state != :connected) do |disclosure| %>
     <% disclosure.with_summary_content do %>
       <div class="flex items-center justify-between gap-3 w-full">
-        <div class="min-w-0">
-          <p class="font-medium text-primary truncate">
-            <%= item.institution_display_name %>
-            <span class="font-normal text-secondary">&middot; <%= item.email %></span>
-          </p>
-          <p class="text-xs text-secondary">
-            <% if item.syncing? %>
-              <%= translation("syncing") %>
-            <% elsif state == :connected %>
-              <%= item.sync_status_summary %>
-            <% elsif state == :code %>
-              <%= translation("awaiting_code") %>
-            <% else %>
-              <%= translation("sign_in_required") %>
-            <% end %>
-          </p>
+        <div class="flex items-center gap-3 min-w-0">
+          <%= render ProviderLogo.new(provider_key: :stashaway) %>
+          <div class="min-w-0">
+            <p class="font-medium text-primary truncate">
+              <%= item.institution_display_name %>
+              <span class="font-normal text-secondary">&middot; <%= item.email %></span>
+            </p>
+            <p class="text-xs text-secondary">
+              <% if item.syncing? %>
+                <%= translation("syncing") %>
+              <% elsif state == :connected %>
+                <%= item.sync_status_summary %>
+              <% elsif state == :code %>
+                <%= translation("awaiting_code") %>
+              <% else %>
+                <%= translation("sign_in_required") %>
+              <% end %>
+            </p>
+          </div>
         </div>
       </div>
     <% end %>

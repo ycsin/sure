@@ -193,6 +193,22 @@ class StashawayAccount::ProcessorTest < ActiveSupport::TestCase
     assert_match(/detail stored last is used/, result.warnings.sole)
   end
 
+  test "an account linked again after an entry from elsewhere keeps the StashAway rows before it" do
+    store_goals(history_through("2026-02-15"))
+    account = link_new_account
+    process
+    create_transaction(account: account, date: Date.new(2026, 2, 1), amount: 5, currency: "SGD", name: "Fee from my statement")
+    account.account_providers.destroy_all
+    @stashaway_account.reload.link_to!(account.reload)
+    assert_equal Date.new(2026, 2, 2), @stashaway_account.reload.import_start_date
+
+    process
+
+    kept = account.entries.where(source: "stashaway", date: ...Date.new(2026, 2, 2)).pluck(:external_id)
+    assert_includes kept, "tx:d1", "the deposit an earlier link imported stays"
+    assert_includes kept, "ret:2026-01"
+  end
+
   test "a StashAway row without an external id that the user edited stays, and one untouched goes" do
     store_goals(history_through("2026-02-15"))
     account = link_new_account

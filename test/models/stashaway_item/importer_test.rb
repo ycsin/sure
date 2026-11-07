@@ -122,6 +122,21 @@ class StashawayItem::ImporterTest < ActiveSupport::TestCase
     assert_equal 1, DebugLogEntry.where("message LIKE ?", "%no longer lists portfolio g2%").count, "logged once"
   end
 
+  test "an account none of whose portfolios StashAway lists keeps its detail, logged against its link" do
+    store_general(stored_goal)
+    general = stashaway_accounts(:general)
+    link = AccountProvider.create!(account: families(:dylan_family).accounts.create!(name: "StashAway SG: General", balance: 0, currency: "SGD", accountable: Investment.new), provider: general)
+    @provider.stubs(:goals).returns([])
+
+    StashawayItem::Importer.new(@item, provider: @provider).import
+
+    record = general.reload.goals.sole
+    assert_equal [ "g1", "unlisted", [ "gd1" ] ], [ record["id"], record["unavailable"], record["transactions"].map { |item| item["id"] } ]
+    assert_equal "General Investing", general.name, "keeps its name with no listed portfolio"
+    entry = DebugLogEntry.where("message LIKE ?", "%no longer lists portfolio g1%").sole
+    assert_equal link, entry.account_provider
+  end
+
   test "a portfolio whose value request fails after its transactions keeps the detail stored for it" do
     store_general(stored_goal)
     @provider.stubs(:goals).returns([
