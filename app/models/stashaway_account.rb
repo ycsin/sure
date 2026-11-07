@@ -27,12 +27,13 @@ class StashawayAccount < ApplicationRecord
   before_save :remember_goal_ids, if: :raw_goals_payload_changed?
 
   class << self
-    # The portfolios that belong together. A name that is only emoji or
-    # punctuation keeps its own group. An account's key is its leading
+    # The portfolios that belong together, by their names' letters and
+    # digits in any script. A name that is only emoji or punctuation keeps
+    # its own group. An account's key is its leading
     # portfolio's, so it follows a rename, and two accounts can come to share
     # one; a portfolio not held yet then joins the older.
     def group_key_for(name:, funding_source:, goal_type:, fallback:)
-      normalized = name.to_s.unicode_normalize(:nfkd).downcase.gsub(/[^a-z0-9 ]+/, " ").squeeze(" ").strip
+      normalized = name.to_s.unicode_normalize(:nfkd).downcase.gsub(/[^\p{L}\p{N} ]+/, " ").squeeze(" ").strip
       [ normalized.presence || fallback, funding_source, goal_type ].join("|")
     end
   end

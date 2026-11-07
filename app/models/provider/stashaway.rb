@@ -181,7 +181,12 @@ class Provider::Stashaway
 
   # The goal's daily value and net deposits since inception, in `currency`.
   def goal_performance(goal_id, currency)
-    performance = graphql("/goals", GOAL_PERFORMANCE_QUERY, goalId: goal_id, displayCurrency: currency).dig("goal", "portfolioPerformance") || {}
+    performance = graphql("/goals", GOAL_PERFORMANCE_QUERY, goalId: goal_id, displayCurrency: currency).dig("goal", "portfolioPerformance")
+    # Without the performance and its value series the answer says nothing
+    # about the goal's value, and an empty one would replace the stored one.
+    unless performance.is_a?(Hash) && performance["netAssetValueData"].is_a?(Array)
+      raise ApiError.new("StashAway goal #{goal_id} answered without its #{currency} performance", status_code: 200)
+    end
 
     {
       "nav" => Array(performance["netAssetValueData"]),

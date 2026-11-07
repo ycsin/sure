@@ -127,6 +127,12 @@ class StashawayItem::Importer
         record["performance"][value_currency] = provider.goal_performance(record["id"], value_currency)
       end
 
+      if (lost = lost_detail(record, stored[record["id"]]))
+        report_portfolio(record, stashaway_account,
+          "StashAway portfolio #{record["id"]} (#{record["name"]}) answered #{lost} after it had some; the detail stored for it last is used")
+        return unavailable_record(record, stored, "empty")
+      end
+
       record
     rescue Provider::Stashaway::NotFound => e
       report_unavailable(record, e, stashaway_account)
@@ -137,6 +143,16 @@ class StashawayItem::Importer
       # still fails the sync.
       report_unavailable(record, e, stashaway_account)
       unavailable_record(record, stored, "error")
+    end
+
+    # A portfolio's transactions only grow, so an open portfolio answering
+    # with none after it had some is a partial answer, not an emptied
+    # portfolio: taken as it is, the plan would drop its rows and value the
+    # account without it, as a goal with no transactions counts as having
+    # nothing to value. One answering without value history but with its
+    # transactions is left to the plan, which values the account without it.
+    def lost_detail(record, last)
+      "no transactions" if last && record["transactions"].empty? && Array(last["transactions"]).any?
     end
 
     def unavailable_record(record, stored, reason)

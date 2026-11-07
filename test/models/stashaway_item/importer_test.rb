@@ -99,6 +99,37 @@ class StashawayItem::ImporterTest < ActiveSupport::TestCase
     assert DebugLogEntry.where("message LIKE ?", "%HTTP 500%detail stored for it last is used%").exists?
   end
 
+  test "an open portfolio answering with no transactions after it had some keeps the detail stored for it" do
+    [ 50, nil ].each do |nav|
+      store_general(stored_goal)
+      @provider.stubs(:goals).returns([ general_goal("ACTIVE") ])
+      stub_goal("g1", rows: [], nav: nav)
+
+      StashawayItem::Importer.new(@item, provider: @provider).import
+
+      record = stashaway_accounts(:general).reload.goals.sole
+      assert_equal [ "empty", [ "gd1" ], 27 ], [ record["unavailable"], record["transactions"].map { |item| item["id"] }, Array(record.dig("performance", "SGD", "nav")).size ]
+    end
+    assert_equal 2, DebugLogEntry.where("message LIKE ?", "%g1 (General Investing) answered no transactions after it had some%").count
+  end
+
+  test "portfolios named in another script group by that name" do
+    @provider.stubs(:goals).returns([
+      { "_id" => "a", "displayName" => "退休 储蓄", "goalType" => "CUSTOM", "fundingSource" => "PERSONAL", "state" => "ARCHIVED", "currency" => "SGD" },
+      { "_id" => "b", "displayName" => "退休储蓄", "goalType" => "CUSTOM", "fundingSource" => "PERSONAL", "state" => "ARCHIVED", "currency" => "SGD" },
+      { "_id" => "c", "displayName" => "退休 储蓄 ", "goalType" => "CUSTOM", "fundingSource" => "PERSONAL", "state" => "ACTIVE", "currency" => "SGD" }
+    ])
+    stub_goal("a", rows: [ stashaway_row("d1", "2026-01-05", "Deposit", 50) ], nav: 0)
+    stub_goal("b", rows: [ stashaway_row("d2", "2026-01-06", "Deposit", 10) ], nav: 10)
+    stub_goal("c", rows: [ stashaway_row("d3", "2026-01-20", "Deposit", 50) ], nav: 50)
+
+    result = StashawayItem::Importer.new(@item, provider: @provider).import
+
+    assert_equal 2, result[:accounts]
+    assert_equal %w[c a], @item.stashaway_accounts.find_by!(group_key: "退休 储蓄|PERSONAL|CUSTOM").goals.map { |goal| goal["id"] }
+    assert @item.stashaway_accounts.exists?(group_key: "退休储蓄|PERSONAL|CUSTOM")
+  end
+
   test "a portfolio StashAway no longer lists keeps the detail stored for it" do
     second = stashaway_goal("g2",
       transactions: [ stashaway_row("d2", "2026-01-10", "Deposit", 20) ],

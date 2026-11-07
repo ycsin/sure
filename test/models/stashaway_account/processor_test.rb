@@ -238,6 +238,19 @@ class StashawayAccount::ProcessorTest < ActiveSupport::TestCase
     assert_includes result.warnings, "nothing applied: no SGD value history for any portfolio"
   end
 
+  test "a plan without value history leaves an account in another currency at its balance" do
+    goals = history_through("2026-02-15")
+    goals.first["performance"] = {}
+    store_goals(goals)
+    @stashaway_account.update!(currency: "SGD", current_balance: 1020)
+    account = @family.accounts.create!(name: "Entered in USD", balance: 500, cash_balance: 500, currency: "USD", accountable: Investment.new)
+    @stashaway_account.link_to!(account)
+
+    process
+
+    assert_equal [ 500, 500 ], [ account.reload.balance, account.cash_balance ]
+  end
+
   test "a plan without value history changes nothing" do
     store_goals(history_through("2026-02-15"))
     account = link_new_account

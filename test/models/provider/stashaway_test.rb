@@ -208,6 +208,15 @@ class Provider::StashawayTest < ActiveSupport::TestCase
     assert_equal "2026-11-03", performance["last_nav_update"]
   end
 
+  test "a performance answer without the performance or its value series is an error, not an empty history" do
+    [ { goal: {} }, { goal: { portfolioPerformance: { currency: "USD", netDepositsData: [] } } } ].each do |data|
+      stub_request(:post, "#{BASE}/graphql/goals").to_return(status: 200, body: { data: data }.to_json, headers: JSON_HEADERS)
+
+      error = assert_raises(Provider::Stashaway::ApiError) { @provider.goal_performance("g1", "USD") }
+      assert_match "without its USD performance", error.message
+    end
+  end
+
   test "an expired token is an authentication error" do
     stub_request(:post, "#{BASE}/graphql/goals").to_return(status: 401, body: "")
 

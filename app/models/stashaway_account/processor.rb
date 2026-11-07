@@ -26,7 +26,7 @@ class StashawayAccount::Processor
 
     plan = build_plan
     unless plan.applicable
-      anchor_balance(stashaway_account.current_balance) if existing_entries.empty? && stashaway_account.current_balance
+      anchor_balance(stashaway_account.current_balance) if cached_value_anchorable?
       return Result.new(entries: 0, pending: 0, warnings: plan.warnings)
     end
 
@@ -126,6 +126,14 @@ class StashawayAccount::Processor
       account.update!(cash_balance: balance)
       result = account.set_current_balance(balance, schedule_sync: false, record_waypoint: false)
       raise Provider::Stashaway::Error, "Failed to set the current balance: #{result.error}" unless result.success?
+    end
+
+    # The value the last import stored, for an account with no StashAway rows
+    # yet. It is in the portfolios' currency, so an account in another one
+    # keeps its balance until an import values the portfolios in its own.
+    def cached_value_anchorable?
+      existing_entries.empty? && stashaway_account.current_balance.present? &&
+        (stashaway_account.currency.blank? || stashaway_account.currency == account.currency)
     end
 
     # The account's StashAway rows by external id, as they are before this run.
