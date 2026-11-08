@@ -192,6 +192,38 @@ class StashawayAccount::EntryPlanTest < ActiveSupport::TestCase
     assert_match(/detail stored last is used/, plan.warnings.sole)
   end
 
+  # Values lag the transactions: the withdrawal that emptied the portfolio can
+  # be stored before the value that shows it gone.
+  test "a withdrawal stored after the last valued day is not booked again when the portfolio closes" do
+    goal = stashaway_goal("C", name: "FD 1", state: "CLOSED", unavailable: "closed",
+      transactions: [ stashaway_row("d1", "2026-01-10", "Deposit", 1000), stashaway_row("w1", "2026-02-11", "Withdrawal", -1010) ],
+      nav: { "SGD" => stashaway_daily("2026-01-10", "2026-02-10") { |d| d < "2026-01-31" ? 1000 : 1010 } })
+
+    plan = nil
+    travel_to(Date.new(2026, 3, 1)) { plan = stashaway_plan([ goal ]) }
+
+    assert plan.applicable
+    assert_equal [
+      "2026-01-10 Deposit -1000",
+      "2026-01-31 Returns (month-end adjustment, 2026-01) -10",
+      "2026-02-11 Withdrawal 1010"
+    ], stashaway_plan_lines(plan.entries)
+    assert_equal 0, plan.expected_balance
+  end
+
+  test "a partial withdrawal after the last valued day leaves the rest to the closing withdrawal" do
+    goal = stashaway_goal("C", name: "FD 1", state: "CLOSED", unavailable: "closed",
+      transactions: [ stashaway_row("d1", "2026-01-10", "Deposit", 1000), stashaway_row("w1", "2026-02-11", "Withdrawal", -600) ],
+      nav: { "SGD" => stashaway_daily("2026-01-10", "2026-02-10") { |d| d < "2026-01-31" ? 1000 : 1010 } })
+
+    plan = nil
+    travel_to(Date.new(2026, 3, 1)) { plan = stashaway_plan([ goal ]) }
+
+    assert_equal [ "2026-02-11 Withdrawal (portfolio closed) 410", "2026-02-11 Withdrawal 600" ].sort,
+                 stashaway_plan_lines(plan.entries).select { |line| line.include?("Withdrawal") }.sort
+    assert_equal 0, plan.expected_balance
+  end
+
   test "a closing withdrawal waits while the account is only valued up to an earlier day" do
     closed = stashaway_goal("C", name: "Simple SGD", state: "CLOSED", unavailable: "closed",
       transactions: [ stashaway_row("d1", "2026-01-10", "Deposit", 100) ],

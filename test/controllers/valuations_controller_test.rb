@@ -60,6 +60,23 @@ class ValuationsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 22000, @entry.reload.amount
   end
 
+  test "a confirmed date change is saved and reloads the page" do
+    new_date = @entry.date - 3.days
+
+    patch valuation_url(@entry), params: { entry: { amount: @entry.amount, date: new_date } }, as: :turbo_stream,
+      headers: { "Referer" => account_url(@entry.account) }
+
+    assert_select "turbo-stream[action=redirect][target=?]", account_url(@entry.account)
+    assert_equal new_date, @entry.reload.date
+  end
+
+  test "a confirmed value update without a Referer reloads the account page" do
+    patch valuation_url(@entry), params: { entry: { amount: 22000, date: @entry.date } }, as: :turbo_stream
+
+    assert_response :success
+    assert_select "turbo-stream[action=redirect][target=?]", account_path(@entry.account)
+  end
+
   test "saving notes keeps the drawer open and redraws it in place" do
     patch valuation_url(@entry), params: { entry: { notes: "Checked against the statement" } }, as: :turbo_stream
 

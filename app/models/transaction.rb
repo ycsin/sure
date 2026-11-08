@@ -34,22 +34,44 @@ class Transaction < ApplicationRecord
   # Contributions category its old kind gave it goes with that kind, as in
   # Transfer#update_investment_contribution!. A category set in the same save,
   # or one the user locked, stays.
-  before_save :drop_stale_contribution_category,
-              if: -> { will_save_change_to_kind? && !will_save_change_to_category_id? }
+  after_save :drop_stale_contribution_category,
+             if: -> { saved_change_to_kind? && !saved_change_to_category_id? }
 
   # Plain-transfer legs still carrying an Investment Contributions category
-  # from an older kind, where the user has not locked the category.
+  # from an older kind, where the user has not locked the category. A lock an
+  # automatic categorizer set itself does not count as the user's.
   scope :with_stale_contribution_category, -> {
     joins(:category)
       .where(kind: UNCATEGORIZED_EXCLUDED_KINDS, categories: { name: Category.all_investment_contributions_names })
-      .where("transactions.locked_attributes ->> 'category_id' IS NULL")
+      .where("transactions.locked_attributes ->> 'category_id' IS NULL OR #{automatic_category_lock_sql}")
   }
+
+  # The category is still the value an automatic categorizer set and locked
+  # itself: the AI, which locks every category it assigns, or Bayes with
+  # lock_results. A category the user changed since is theirs, lock and all,
+  # as in Enrichable#clear_ai_cache and Family#clear_bayes_locks!.
+  def self.automatic_category_lock_sql
+    "(#{category_from_sql("ai")} OR #{category_from_sql("bayes", metadata: { locked_by_bayes: true })})"
+  end
+
+  # Clears the Investment Contributions category from the plain-transfer legs
+  # in `scope` that still carry it without a lock of the user's, and touches
+  # their entries. Rechecked under each row's lock (reassign_category!), so a
+  # category or lock a user sets meanwhile is not overwritten. Returns how
+  # many it cleared.
+  def self.drop_stale_contribution_categories!(scope = all)
+    reassign_category!(scope.with_stale_contribution_category, nil)
+  end
 
   def stale_contribution_category?
     UNCATEGORIZED_EXCLUDED_KINDS.include?(kind) &&
       category_id.present? &&
-      !locked?(:category_id) &&
-      Category.all_investment_contributions_names.include?(category&.name)
+      Category.all_investment_contributions_names.include?(category&.name) &&
+      (!locked?(:category_id) || category_lock_automatic?)
+  end
+
+  def category_lock_automatic?
+    persisted? && self.class.where(id: id).where(self.class.automatic_category_lock_sql).exists?
   end
 
   # Accessors for exchange_rate stored in extra jsonb field
@@ -77,8 +99,14 @@ class Transaction < ApplicationRecord
 
   private
 
+    # Cleared in the database under the row lock rather than from this
+    # record's copy, which a concurrent category edit may have outdated.
     def drop_stale_contribution_category
-      self.category = nil if stale_contribution_category?
+      return unless stale_contribution_category?
+      return if self.class.drop_stale_contribution_categories!(self.class.where(id: id)).zero?
+
+      self.category_id = nil
+      clear_attribute_changes([ :category_id ])
     end
 
     def exchange_rate_must_be_valid

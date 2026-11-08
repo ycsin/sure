@@ -284,11 +284,20 @@ namespace :data_migration do
   # under that category. Clears it unless the user locked the category.
   # Idempotent.
   #
-  #   DRY_RUN=1    print what would change without writing
-  #   FAMILY_ID=id limit the run to one family
+  # Run reconcile_investment_transfer_kinds first. A leg still stored as a
+  # plain transfer whose transfer makes it a contribution can carry a
+  # category the user picked in the transfer editor before the editor locked
+  # its choice; the reconciler gives the leg back its contribution kind, which
+  # takes it out of this task's scope.
+  #
+  #   DRY_RUN=1      print what would change without writing
+  #   FAMILY_ID=id   limit the run to one family
+  #   BATCH_SIZE=n   rows per batch (default 1,000)
   task clear_stale_contribution_categories: :environment do
     dry_run = ActiveModel::Type::Boolean.new.cast(ENV["DRY_RUN"]) || false
-    scope = Transaction.with_stale_contribution_category
+    batch_size = Integer(ENV.fetch("BATCH_SIZE", 1_000))
+    abort "BATCH_SIZE must be positive" unless batch_size.positive?
+    scope = Transaction.all
 
     if ENV["FAMILY_ID"].present?
       family = Family.find_by(id: ENV["FAMILY_ID"])
@@ -296,15 +305,19 @@ namespace :data_migration do
       scope = scope.where(id: family.transactions.select(:id))
     end
 
-    count = scope.count
-    unless dry_run
-      now = Time.current
-      Transaction.transaction do
-        entry_ids = Entry.where(entryable_type: "Transaction", entryable_id: scope.select(:id)).pluck(:id)
-        Transaction.where(id: scope.select(:id)).update_all(category_id: nil, updated_at: now)
-        # Report and transaction-list caches are keyed on entries' updated_at.
-        Entry.where(id: entry_ids).update_all(updated_at: now)
+    stale = scope.with_stale_contribution_category
+    # Bounded batches, read and written one at a time, so a large cleanup
+    # neither loads every id nor holds every row's lock at once. Each batch's
+    # rows are locked and rechecked as they are written, and only their
+    # entries are touched (Transaction.reassign_category!).
+    count = if dry_run
+      stale.count
+    else
+      cleared = 0
+      stale.in_batches(of: batch_size) do |batch|
+        cleared += Transaction.drop_stale_contribution_categories!(Transaction.where(id: batch.select(:id)))
       end
+      cleared
     end
 
     puts "#{dry_run ? "Dry run: " : ""}#{count} plain transfer legs #{dry_run ? "would lose" : "lost"} the Investment Contributions category"

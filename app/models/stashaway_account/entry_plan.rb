@@ -200,7 +200,7 @@ class StashawayAccount::EntryPlan
           end
         end
 
-        rows + closing_withdrawal(goal)
+        rows + closing_withdrawal(goal, rows)
       end
 
       unknown_types.each do |type, count|
@@ -273,13 +273,17 @@ class StashawayAccount::EntryPlan
 
     # StashAway has no detail for a closed portfolio, so the money that left
     # between the last sync and the closing is booked on the first day it is
-    # known to be gone, where the user can match it to the bank side.
-    def closing_withdrawal(goal)
+    # known to be gone, where the user can match it to the bank side. Values
+    # lag the transactions by a day or two, so rows the stored detail already
+    # holds after the last valued day count first: a withdrawal there took
+    # that money already, and only what it left is booked.
+    def closing_withdrawal(goal, rows)
       series = series_for(goal)
       return [] unless closed?(goal) && series
 
-      amount = round2(series.at(series.last))
-      return [] if amount.abs < HALF_CENT
+      after_last_value = rows.select { |row| row.date > series.last }
+      amount = round2(series.at(series.last) - after_last_value.sum(&:amount))
+      return [] if amount < HALF_CENT
 
       [ PlannedEntry.new(
         external_id: "tx:closed:#{goal["id"]}",
