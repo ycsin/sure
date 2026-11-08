@@ -731,6 +731,43 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "rejecting a pending match from the list redraws both rows in place" do
+    transfer = transfers(:one)
+    assert transfer.pending?, "precondition: the fixture is a pending match"
+    inflow_entry = transfer.inflow_transaction.entry
+    outflow_entry = transfer.outflow_transaction.entry
+
+    assert_difference -> { Transfer.count } => -1, -> { RejectedTransfer.count } => 1 do
+      patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream
+    end
+
+    assert_response :success
+    assert_equal "text/vnd.turbo-stream.html", response.media_type
+    assert_select "turbo-stream[action=replace][target=?]", dom_id(inflow_entry)
+    assert_select "turbo-stream[action=replace][target=?]", dom_id(outflow_entry)
+    assert_select "turbo-stream[action=redirect]", count: 0
+    assert_no_match transfer_path(transfer), response.body, "the redrawn rows still offer the rejected match"
+  end
+
+  test "rejecting a pending match redraws only the rows the user can see" do
+    transfer = cross_owner_transfer(outflow_account: accounts(:depository), inflow_account: member_loan)
+
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream
+
+    assert_response :success
+    assert_select "turbo-stream[action=replace][target=?]", dom_id(transfer.outflow_transaction.entry)
+    assert_select "turbo-stream[target=?]", dom_id(transfer.inflow_transaction.entry), count: 0
+  end
+
+  test "rejecting a confirmed transfer reloads the page, whose totals it moves" do
+    transfer = cross_owner_transfer(outflow_account: accounts(:depository), inflow_account: member_loan, status: "confirmed")
+
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+      headers: { "Referer" => transactions_url }
+
+    assert_select "turbo-stream[action=redirect][target=?]", transactions_url
+  end
+
   test "can reject a match when only the outflow account is accessible" do
     # Confirmed, so the legs carry transfer kinds that rejecting must reset
     transfer = cross_owner_transfer(outflow_account: accounts(:depository), inflow_account: member_loan, status: "confirmed")

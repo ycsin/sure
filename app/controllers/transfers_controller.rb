@@ -238,11 +238,24 @@ class TransfersController < ApplicationController
     def reject_transfer
       return unless require_account_permission!(unlink_permission_account, redirect_path: transactions_url)
 
+      was_pending = @transfer.pending?
       @transfer.reject!
 
       respond_to do |format|
         format.html { redirect_back_or_to transactions_url, notice: t(".success") }
-        format.turbo_stream
+        format.turbo_stream do
+          # A pending match changed neither leg, so only its rows need redrawing.
+          # A confirmed one hands both legs back to income and spending, which
+          # moves the page's totals; those need the whole page.
+          if was_pending
+            @rejected_entries = Current.accessible_entries
+              .where(entryable_type: "Transaction", entryable_id: [ @transfer.inflow_transaction_id, @transfer.outflow_transaction_id ])
+              .includes(:entryable)
+            render :reject
+          else
+            stream_redirect_to(request.referer.presence || transactions_url)
+          end
+        end
       end
     end
 

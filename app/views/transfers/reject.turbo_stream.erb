@@ -1,0 +1,7 @@
+<%# The rejected match's legs, loaded after it was destroyed: the transfer's own
+    legs still hold it in memory and would draw its pill again. Each row holds
+    its category menus and the match controls, so redrawing the row is enough.
+    Only the legs the user can see are drawn. %>
+<% @rejected_entries.each do |entry| %>
+  <%= turbo_stream.replace entry %>
+<% end %>
