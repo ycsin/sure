@@ -238,25 +238,38 @@ class TransfersController < ApplicationController
     def reject_transfer
       return unless require_account_permission!(unlink_permission_account, redirect_path: transactions_url)
 
-      was_pending = @transfer.pending?
+      in_place = rejection_redraws_in_place?
       @transfer.reject!
 
       respond_to do |format|
         format.html { redirect_back_or_to transactions_url, notice: t(".success") }
         format.turbo_stream do
-          # A pending match changed neither leg, so only its rows need redrawing.
-          # A confirmed one hands both legs back to income and spending, which
-          # moves the page's totals; those need the whole page.
-          if was_pending
+          if in_place
             @rejected_entries = Current.accessible_entries
               .where(entryable_type: "Transaction", entryable_id: [ @transfer.inflow_transaction_id, @transfer.outflow_transaction_id ])
               .includes(:entryable)
+              .to_a
+            # A leg may still pair with something else; its row shows that hint
+            # as the list would.
+            @transfer_hint_transaction_ids = Current.family.transaction_ids_with_transfer_candidates(@rejected_entries.map(&:entryable), user: Current.user)
             render :reject
           else
             stream_redirect_to(request.referer.presence || transactions_url)
           end
         end
       end
+    end
+
+    # Whether rejecting changes nothing on the page but the two legs' rows, so
+    # those rows can be redrawn in place. Not when the transfer was confirmed
+    # (its legs go back to income and spending, moving the page's totals), has
+    # fees (rejecting deletes them), or has a leg drawn inside a split group
+    # (its row needs the group's context).
+    def rejection_redraws_in_place?
+      @transfer.pending? &&
+        @transfer.fee_transactions.none? &&
+        !Entry.where(entryable_type: "Transaction", entryable_id: [ @transfer.inflow_transaction_id, @transfer.outflow_transaction_id ])
+          .where.not(parent_entry_id: nil).exists?
     end
 
     # Unlinking (reject/destroy) needs write access to one endpoint, plus every

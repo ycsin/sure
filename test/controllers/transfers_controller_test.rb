@@ -759,6 +759,39 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     assert_select "turbo-stream[target=?]", dom_id(transfer.inflow_transaction.entry), count: 0
   end
 
+  test "rejecting a pending match with fees reloads the page, as the fees go with it" do
+    transfer = transfers(:one)
+    attach_fee(transfer, account: accounts(:depository))
+
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+      headers: { "Referer" => transactions_url }
+
+    assert_select "turbo-stream[action=redirect][target=?]", transactions_url
+  end
+
+  test "rejecting a pending match with a leg in a split group reloads the page, which draws the group" do
+    transfer = transfers(:one)
+    outflow_entry = transfer.outflow_transaction.entry
+    parent = create_transaction(account: outflow_entry.account, amount: 250, name: "Split parent")
+    outflow_entry.update_columns(parent_entry_id: parent.id)
+
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+      headers: { "Referer" => transactions_url }
+
+    assert_select "turbo-stream[action=redirect][target=?]", transactions_url
+  end
+
+  test "a redrawn leg that still pairs with another transaction offers the transfer hint" do
+    transfer = transfers(:one)
+    inflow_entry = transfer.inflow_transaction.entry
+    create_transaction(account: accounts(:depository), amount: -inflow_entry.amount, date: inflow_entry.date, name: "Another payment")
+
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream
+
+    assert_select "turbo-stream[action=replace][target=?]", dom_id(inflow_entry)
+    assert_select "##{dom_id(transfer.inflow_transaction, :transfer_hint)}"
+  end
+
   test "rejecting a confirmed transfer reloads the page, whose totals it moves" do
     transfer = cross_owner_transfer(outflow_account: accounts(:depository), inflow_account: member_loan, status: "confirmed")
 
