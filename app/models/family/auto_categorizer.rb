@@ -311,8 +311,14 @@ class Family::AutoCategorizer
       )
     end
 
+    # Plain transfers (funds_movement, cc_payment) carry no category
+    # (Transaction::UNCATEGORIZED_EXCLUDED_KINDS), so they are left out, as
+    # Family#bayes_categorize_uncategorized leaves them out. Otherwise the AI
+    # could put back a category Transaction.drop_stale_contribution_categories!
+    # removed.
     def scope
       family.transactions.where(id: transaction_ids, category_id: nil)
+                         .where.not(kind: Transaction::UNCATEGORIZED_EXCLUDED_KINDS)
                          .enrichable(:category_id)
                          .includes(:category, :merchant, :entry)
     end

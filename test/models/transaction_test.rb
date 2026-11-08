@@ -646,6 +646,38 @@ class TransactionTest < ActiveSupport::TestCase
     assert_equal category, by_user.reload.category
   end
 
+  test "clearing an automatic categorizer's category drops its lock and claim with it" do
+    category = families(:dylan_family).investment_contributions_category
+    by_ai = auto_locked_leg(accounts(:depository), category, "ai")
+    by_bayes = auto_locked_leg(accounts(:depository), category, "bayes", metadata: { locked_by_bayes: true })
+
+    [ by_ai, by_bayes ].each { |leg| leg.reload.update!(kind: "funds_movement") }
+
+    [ by_ai, by_bayes ].each do |leg|
+      leg.reload
+      assert_nil leg.category_id
+      assert_not leg.locked?(:category_id), "categorizers would skip the leg if it became a plain transaction again"
+    end
+    assert_not by_ai.data_enrichments.exists?(attribute_name: "category_id", source: "ai")
+    assert_not by_bayes.data_enrichments.find_by!(attribute_name: "category_id", source: "bayes").metadata.key?("locked_by_bayes")
+  end
+
+  test "a copy loaded before a categorizer set the category still has it cleared" do
+    leg = accounts(:depository).entries.create!(
+      name: "To broker", amount: 100, date: Date.current, currency: "USD",
+      entryable: Transaction.new(kind: "investment_contribution")
+    ).transaction
+    loaded_earlier = Transaction.find(leg.id)
+    leg.enrich_attribute(:category_id, families(:dylan_family).investment_contributions_category.id, source: "ai")
+    leg.lock_attr!(:category_id)
+
+    loaded_earlier.update!(kind: "funds_movement")
+
+    assert_nil leg.reload.category_id
+    assert_nil loaded_earlier.category_id
+    assert_not loaded_earlier.locked?(:category_id)
+  end
+
   test "with_stale_contribution_category counts an automatic categorizer's lock as no lock" do
     category = families(:dylan_family).investment_contributions_category
     by_ai = auto_locked_leg(accounts(:depository), category, "ai")

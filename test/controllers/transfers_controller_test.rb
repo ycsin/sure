@@ -700,6 +700,20 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     assert outflow.locked?(:category_id), "a cleanup or sync would treat an unlocked choice as its own"
   end
 
+  test "a category re-chosen in the transfer editor stays the user's where the AI had set it" do
+    transfer = transfers(:one)
+    category = families(:dylan_family).investment_contributions_category
+    outflow = transfer.outflow_transaction
+    outflow.enrich_attribute(:category_id, category.id, source: "ai")
+    outflow.lock_attr!(:category_id)
+
+    patch transfer_url(transfer), params: { transfer: { category_id: category.id } }
+
+    assert_empty Transaction.where(id: outflow.id).without_user_category_lock
+    outflow.reload.update!(kind: "funds_movement")
+    assert_equal category, outflow.reload.category
+  end
+
   test "confirming a transfer keeps the outflow category" do
     transfer = transfers(:one)
     transfer.outflow_transaction.update!(category: categories(:food_and_drink))
