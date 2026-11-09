@@ -176,11 +176,12 @@ module Enrichable
       ai_enrichments = data_enrichments.where(source: "ai")
 
       # Only unlock attributes where current value still matches what AI set
-      # If user changed the value, they took ownership - don't unlock
+      # If user changed the value, they took ownership - don't unlock, even
+      # once they change it back (the change marked the record superseded)
       attrs_to_unlock = ai_enrichments.select do |enrichment|
         attr_name = enrichment.attribute_name
         current_value = respond_to?(attr_name) ? send(attr_name) : self[attr_name]
-        current_value.to_s == enrichment.value.to_s
+        current_value.to_s == enrichment.value.to_s && enrichment.metadata&.dig("superseded") != true
       end.map(&:attribute_name).uniq
 
       # Batch unlock in a single update
