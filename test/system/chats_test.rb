@@ -45,6 +45,25 @@ class ChatsTest < ApplicationSystemTestCase
     end
   end
 
+  test "the message box shows three lines before it scrolls" do
+    with_env_overrides OPENAI_ACCESS_TOKEN: "test-token" do
+      chat = @user.chats.first
+      @user.update!(ai_enabled: true, last_viewed_chat: chat)
+
+      visit root_url
+
+      within "#chat-container" do
+        input = find("#chat-form textarea")
+        input.send_keys("One", [ :shift, :enter ], "Two", [ :shift, :enter ], "Three")
+        assert_equal "hidden", input.evaluate_script("getComputedStyle(this).overflowY")
+        assert_equal input.evaluate_script("this.scrollHeight"), input.evaluate_script("this.clientHeight")
+
+        input.send_keys([ :shift, :enter ], "Four")
+        assert_equal "auto", input.evaluate_script("getComputedStyle(this).overflowY")
+      end
+    end
+  end
+
   test "sidebar shows last viewed chat" do
     with_env_overrides OPENAI_ACCESS_TOKEN: "test-token" do
       chat = @user.chats.first

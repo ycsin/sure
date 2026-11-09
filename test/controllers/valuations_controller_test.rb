@@ -119,7 +119,7 @@ class ValuationsControllerTest < ActionDispatch::IntegrationTest
     patch valuation_url(@entry), params: { entry: { notes: "" } }
 
     assert_redirected_to account_url(@entry.account)
-    assert_equal "", @entry.reload.notes
+    assert_nil @entry.reload.notes
   end
 
   test "a balance update without the notes field keeps the note" do
