@@ -106,6 +106,7 @@ class TransfersController < ApplicationController
       update_investment_contribution
     end
 
+    @view_ctx = view_ctx_from_referer
     respond_to do |format|
       format.html { redirect_back_or_to transactions_url, notice: t(".success") }
       format.turbo_stream do
@@ -242,7 +243,7 @@ class TransfersController < ApplicationController
     def reject_transfer
       return unless require_account_permission!(unlink_permission_account, redirect_path: transactions_url)
 
-      @view_ctx = params[:view_ctx] == "account" ? "account" : "global"
+      @view_ctx = view_ctx_from_referer
       # Locked, so a confirmation landing meanwhile cannot change what the
       # rejection undoes after the response was chosen.
       in_place = @transfer.with_lock do
@@ -302,6 +303,22 @@ class TransfersController < ApplicationController
         @transfer.fee_transactions.none? &&
         !legs.where.not(parent_entry_id: nil).exists? &&
         (@view_ctx == "account" || legs.merge(Current.accessible_entries).count < 2)
+    end
+
+    # Rows are drawn the way the page that asked draws them: an account page
+    # signs each leg for its own account, every other list shows a transfer as
+    # +/-. Taken from the page the request came from, the account page of one
+    # of the legs, rather than from a client flag, so a stale link or a row
+    # another response redrew cannot claim a view the page does not have.
+    # Without a Referer it is the global list, which reloads after a rejection.
+    def view_ctx_from_referer
+      path = URI.parse(request.referer.to_s).path
+      return "global" if path.blank?
+
+      leg_account_ids = Entry.where(entryable_type: "Transaction", entryable_id: [ @transfer.inflow_transaction_id, @transfer.outflow_transaction_id ]).pluck(:account_id)
+      leg_account_ids.any? { |id| path == account_path(id) } ? "account" : "global"
+    rescue URI::InvalidURIError
+      "global"
     end
 
     # Unlinking (reject/destroy) needs write access to one endpoint, plus every

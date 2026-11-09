@@ -763,7 +763,8 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     outflow_entry = transfer.outflow_transaction.entry
 
     assert_difference -> { Transfer.count } => -1, -> { RejectedTransfer.count } => 1 do
-      patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream
+      patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+        headers: { "Referer" => account_url(transfer.outflow_transaction.entry.account) }
     end
 
     assert_response :success
@@ -811,7 +812,9 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     inflow_entry = transfer.inflow_transaction.entry
     create_transaction(account: accounts(:depository), amount: -inflow_entry.amount, date: inflow_entry.date, name: "Another payment")
 
-    patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+
+      headers: { "Referer" => account_url(transfer.outflow_transaction.entry.account) }
 
     assert_select "turbo-stream[action=replace][target=?]", dom_id(inflow_entry)
     assert_select "##{dom_id(transfer.inflow_transaction, :transfer_hint)}"
@@ -824,7 +827,9 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     inflow_entry = transfer.inflow_transaction.entry
     other = create_transaction(account: accounts(:depository), amount: -inflow_entry.amount, date: inflow_entry.date, name: "Another payment")
 
-    patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+
+      headers: { "Referer" => account_url(transfer.outflow_transaction.entry.account) }
 
     assert_select "turbo-stream[action=replace][target=?]", dom_id(other)
     assert_select "##{dom_id(other.transaction, :transfer_hint)}"
@@ -837,10 +842,11 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     parent = create_transaction(account: accounts(:depository), amount: 500, name: "Split parent")
     other.update_columns(parent_entry_id: parent.id)
 
-    patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
-      headers: { "Referer" => transactions_url }
+    account_page = account_url(transfer.outflow_transaction.entry.account)
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+      headers: { "Referer" => account_page }
 
-    assert_select "turbo-stream[action=redirect][target=?]", transactions_url
+    assert_select "turbo-stream[action=redirect][target=?]", account_page
   end
 
   test "a rejection freeing more rows than the bound to pair reloads the page" do
@@ -850,20 +856,22 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
       create_transaction(account: accounts(:depository), amount: -inflow_entry.amount, date: inflow_entry.date, name: "Candidate #{i}")
     end
 
-    patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
-      headers: { "Referer" => transactions_url }
+    account_page = account_url(transfer.outflow_transaction.entry.account)
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+      headers: { "Referer" => account_page }
 
-    assert_select "turbo-stream[action=redirect][target=?]", transactions_url
+    assert_select "turbo-stream[action=redirect][target=?]", account_page
   end
 
   test "a rejection leaving no row the user can see reloads the page" do
     transfer = transfers(:one)
     TransfersController.any_instance.stubs(:accessible_transaction_entries).returns([])
 
-    patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
-      headers: { "Referer" => transactions_url }
+    account_page = account_url(transfer.outflow_transaction.entry.account)
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+      headers: { "Referer" => account_page }
 
-    assert_select "turbo-stream[action=redirect][target=?]", transactions_url
+    assert_select "turbo-stream[action=redirect][target=?]", account_page
   end
 
   # The transactions list draws a transfer once, by its outflow, so the
@@ -882,19 +890,54 @@ class TransfersControllerTest < ActionDispatch::IntegrationTest
     transfer = transfers(:one)
     transfer.outflow_transaction.update_columns(kind: "funds_movement")
 
-    patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream
+    patch transfer_url(transfer), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+
+      headers: { "Referer" => account_url(transfer.outflow_transaction.entry.account) }
 
     assert_select "turbo-stream[action=replace][target=?]", dom_id(transfer.outflow_transaction.entry)
     assert_no_match "+/-", response.body
   end
 
-  test "an account page's reject button names the page's view" do
+  test "an account page's reject button carries no view of its own" do
     transfer = transfers(:one)
 
     get account_url(transfer.outflow_transaction.entry.account)
 
     assert_select "##{dom_id(transfer.outflow_transaction, :transfer_match)} form[action=?]",
-      transfer_path(transfer, transfer: { status: "rejected" }, view_ctx: "account")
+      transfer_path(transfer, transfer: { status: "rejected" })
+  end
+
+  # The page a request comes from decides the view, so a client flag cannot
+  # claim the account view on the transactions list.
+  test "a view_ctx param does not make the transactions list redraw a rejection in place" do
+    transfer = transfers(:one)
+
+    patch transfer_url(transfer, view_ctx: "account"), params: { transfer: { status: "rejected" } }, as: :turbo_stream,
+      headers: { "Referer" => transactions_url }
+
+    assert_select "turbo-stream[action=redirect][target=?]", transactions_url
+  end
+
+  test "editing a pending transfer on an account page redraws its rows in the account view" do
+    transfer = transfers(:one)
+    transfer.outflow_transaction.update_columns(kind: "funds_movement")
+
+    patch transfer_url(transfer), params: { transfer: { notes: "Rent" } }, as: :turbo_stream,
+      headers: { "Referer" => account_url(transfer.outflow_transaction.entry.account) }
+
+    assert_select "turbo-stream[action=replace][target=?]", dom_id(transfer.outflow_transaction.entry)
+    assert_no_match "+/-", response.body
+  end
+
+  test "editing a pending transfer on the transactions list redraws its rows in the list's view" do
+    transfer = transfers(:one)
+    transfer.outflow_transaction.update_columns(kind: "funds_movement")
+
+    patch transfer_url(transfer), params: { transfer: { notes: "Rent" } }, as: :turbo_stream,
+      headers: { "Referer" => transactions_url }
+
+    assert_select "turbo-stream[action=replace][target=?]", dom_id(transfer.outflow_transaction.entry)
+    assert_match "+/-", response.body
   end
 
   test "rejecting a confirmed transfer reloads the page, whose totals it moves" do

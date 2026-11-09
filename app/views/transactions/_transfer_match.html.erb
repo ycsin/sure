@@ -1,4 +1,4 @@
-<%# locals: (transaction:, view_ctx: "global") %>
+<%# locals: (transaction:) %>
 
 <div id="<%= dom_id(transaction, "transfer_match") %>" class="flex flex-wrap items-center justify-end gap-1 min-w-0 max-w-full">
   <% if transaction.transfer.confirmed? %>
@@ -71,7 +71,7 @@
 
       <%= render DS::Button.new(
             variant: :icon, size: :sm, icon: "x",
-            href: transfer_path(transaction.transfer, transfer: { status: "rejected" }, view_ctx: view_ctx),
+            href: transfer_path(transaction.transfer, transfer: { status: "rejected" }),
             method: :patch,
             title: t("transactions.transfer_match.reject_match"),
             aria: { label: t("transactions.transfer_match.reject_match") }
