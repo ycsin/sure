@@ -17,6 +17,20 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert_select "p.ml-auto.privacy-sensitive"
   end
 
+  test "the sidebar shows accounts at one institution as one entry opening onto them" do
+    family = @user.family
+    first = family.accounts.create!(name: "Wise EUR", balance: 10, currency: family.currency, institution_name: "Wise", accountable: Depository.new)
+    second = family.accounts.create!(name: "Wise GBP", balance: 20, currency: family.currency, institution_name: "Wise", accountable: Depository.new)
+
+    get root_url
+
+    assert_select "details[data-institution-bundle='wise']", minimum: 1 do
+      assert_select "summary", text: /Wise.*2 accounts/m
+      assert_select "a[href='#{account_path(first)}']"
+      assert_select "a[href='#{account_path(second)}']"
+    end
+  end
+
   test "show points an unmatched transaction with a counterpart to the transfer matcher" do
     outflow = create_transaction(account: @account, name: "Hint outflow", amount: 500, date: Date.current)
     create_transaction(account: accounts(:credit_card), name: "Hint inflow", amount: -500, date: Date.current)

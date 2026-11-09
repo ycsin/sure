@@ -1,0 +1,31 @@
+<%# locals: (bundle:, account_group:, mobile: false, all_tab: false) %>
+<%# Several accounts at one institution: one row with the institution's icon,
+    name and combined total, opening onto its accounts, indented under it. %>
+<% open = bundle.accounts.any? { |account| page_active?(account_path(account)) } %>
+<%= tag.details id: bundle.dom_id(account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile)),
+                open: open,
+                class: "group/bundle",
+                data: { institution_bundle: bundle.key } do %>
+  <summary class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer list-none hover:bg-surface-hover [&::-webkit-details-marker]:hidden"
+           title="<%= t("accounts.sidebar.institution_bundle_title", institution: bundle.name, count: bundle.accounts.size) %>">
+    <%= render "accounts/logo", account: bundle.logo_account, size: "sm", color: account_group.color %>
+
+    <div class="min-w-0 grow">
+      <%= tag.p bundle.name, class: class_names("text-sm text-primary font-medium truncate", "animate-pulse" => bundle.syncing?) %>
+      <p class="flex items-center gap-1 text-sm text-secondary">
+        <span class="truncate"><%= t("accounts.sidebar.institution_accounts", count: bundle.accounts.size) %></span>
+        <%= icon "chevron-down", size: "xs", class: "shrink-0 transition-transform group-open/bundle:rotate-180" %>
+      </p>
+    </div>
+
+    <div class="ml-auto text-right shrink-0">
+      <%= tag.p format_money(bundle.total_money), class: "text-sm font-medium text-primary whitespace-nowrap privacy-sensitive" %>
+    </div>
+  </summary>
+
+  <div class="ml-6 pl-2 border-l border-secondary space-y-1 mt-1">
+    <% bundle.accounts.each do |account| %>
+      <%= render "accounts/sidebar_account_row", account: account, account_group: account_group, show_logo: false %>
+    <% end %>
+  </div>
+<% end %>

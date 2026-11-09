@@ -5,6 +5,29 @@ class BalanceSheet::AccountGroup
 
   attr_reader :name, :color, :accountable_type, :accounts
 
+  # Several accounts of the group held at one institution (the currency
+  # balances of a Wise account, say), shown in the sidebar as one entry with
+  # their combined total in the family's currency.
+  InstitutionBundle = Data.define(:key, :name, :accounts, :total, :currency) do
+    include Monetizable
+
+    monetize :total, as: :total_money
+
+    # The account whose icon stands for the institution: one with a logo of
+    # its own, else the first.
+    def logo_account
+      accounts.find { |account| account.logo.attached? } || accounts.first
+    end
+
+    def syncing?
+      accounts.any?(&:syncing?)
+    end
+
+    def dom_id(prefix)
+      "#{prefix}_institution_#{Digest::MD5.hexdigest(key)[0, 12]}"
+    end
+  end
+
   def initialize(name:, color:, accountable_type:, accounts:, classification_group:)
     @name = name
     @color = color
@@ -49,6 +72,30 @@ class BalanceSheet::AccountGroup
     accounts.any?(&:syncing?)
   end
 
+  # The group's sidebar rows, in order: an account, or a bundle where two or
+  # more accounts share an institution (by name, else domain, ignoring case
+  # and spacing). A bundle takes the place of its first account.
+  def sidebar_entries
+    by_institution = accounts.group_by { |account| institution_key(account) }
+    bundled = Set.new
+
+    accounts.filter_map do |account|
+      key = institution_key(account)
+      members = key ? by_institution[key] : []
+      next account if members.size < 2
+      next if bundled.include?(key)
+
+      bundled << key
+      InstitutionBundle.new(
+        key: key,
+        name: account.institution_name.presence || account.institution_domain,
+        accounts: members,
+        total: BalanceSheet::ClassificationGroup.counted_accounts(members).sum(&:converted_balance),
+        currency: currency
+      )
+    end
+  end
+
   # "asset" or "liability"
   def classification
     classification_group.classification
@@ -60,4 +107,8 @@ class BalanceSheet::AccountGroup
 
   private
     attr_reader :classification_group
+
+    def institution_key(account)
+      (account.institution_name.presence || account.institution_domain).to_s.downcase.squish.presence
+    end
 end
