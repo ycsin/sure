@@ -219,6 +219,62 @@ class Holding::PortfolioCacheTest < ActiveSupport::TestCase
     assert_equal 0, cache.get_price(@security.id, 4.days.ago.to_date).price, "not the price from after it"
   end
 
+  # SnapTrade books a STOCK_DIVIDEND as a Dividend trade at 0: the shares
+  # arrive, and nobody observed a price.
+  test "a stock dividend at no price takes the nearest price and does not block a later movement's" do
+    Security::Price.destroy_all
+    create_movement(@security, qty: 1, date: 1.day.ago.to_date, label: "Dividend")
+    create_movement(@security, qty: 1, date: Date.current)
+
+    cache = Holding::PortfolioCache.new(@account)
+
+    assert_equal @trade.price, cache.get_price(@security.id, 1.day.ago.to_date).price
+    assert_equal @trade.price, cache.get_price(@security.id, Date.current).price
+  end
+
+  test "a reinvestment at no price takes the nearest price and does not block a later movement's" do
+    Security::Price.destroy_all
+    create_movement(@security, qty: 1, date: 1.day.ago.to_date, label: "Reinvestment")
+    create_movement(@security, qty: 1, date: Date.current)
+
+    cache = Holding::PortfolioCache.new(@account)
+
+    assert_equal @trade.price, cache.get_price(@security.id, 1.day.ago.to_date).price
+    assert_equal @trade.price, cache.get_price(@security.id, Date.current).price
+  end
+
+  test "an unlabelled trade at no price stays a price, as it might be a split" do
+    Security::Price.destroy_all
+    create_movement(@security, qty: 1, date: 1.day.ago.to_date, label: nil)
+    create_movement(@security, qty: 1, date: Date.current)
+
+    cache = Holding::PortfolioCache.new(@account)
+
+    assert_equal 0, cache.get_price(@security.id, Date.current).price
+  end
+
+  test "an earlier movement takes no price from across a possible split on a day that also has a quote" do
+    Security::Price.destroy_all
+    create_movement(@security, qty: 1, date: 4.days.ago.to_date)
+    create_movement(@security, qty: 1, date: 3.days.ago.to_date, label: "Other")
+    Security::Price.create!(security: @security, date: 3.days.ago.to_date, price: 100, currency: "USD")
+
+    cache = Holding::PortfolioCache.new(@account)
+
+    assert_equal 0, cache.get_price(@security.id, 4.days.ago.to_date).price, "the quote may be in the shares after the split"
+  end
+
+  test "a future price is scaled back across a split before it, even one not yet in effect" do
+    security = Security.create!(name: "Future Split", ticker: "FSPL", exchange_operating_mic: "TEST")
+    create_movement(security, qty: 1, date: Date.current)
+    create_trade(security, account: @account, qty: 1, date: 2.days.from_now.to_date, price: 50)
+    Security::Split.create!(security: security, ex_date: 1.day.from_now.to_date, numerator: 2, denominator: 1, source: "manual")
+
+    cache = Holding::PortfolioCache.new(@account)
+
+    assert_equal 100, cache.get_price(security.id, Date.current).price
+  end
+
   test "converts historical prices using the requested date exchange rate" do
     account = families(:empty).accounts.create!(
       name: "CHF Brokerage",
@@ -260,7 +316,7 @@ class Holding::PortfolioCacheTest < ActiveSupport::TestCase
     # recorded, or under another label, as a split booked as a trade is
     def create_movement(security, qty:, date:, label: Trade::TRANSFER_LABEL)
       @account.entries.create!(
-        name: label,
+        name: label || "Trade",
         date: date,
         amount: 0,
         currency: "USD",
