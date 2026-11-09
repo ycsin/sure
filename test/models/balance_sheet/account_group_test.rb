@@ -37,6 +37,29 @@ class BalanceSheet::AccountGroupTest < ActiveSupport::TestCase
     assert_equal Money.new(120, "SGD"), bundle.total_money
   end
 
+  test "with a name order a bundle sorts by its institution's name, its accounts keeping theirs" do
+    create_account("Apple", balance: 1)
+    create_account("Zeta EUR", balance: 1, institution: "Monzo")
+    create_account("Alpha GBP", balance: 1, institution: "Monzo")
+    create_account("Pear", balance: 1)
+
+    entries = cash_group.sidebar_entries(order: AccountOrder.new("name_asc"))
+
+    assert_equal %w[Apple Monzo Pear], entries.map(&:name)
+    assert_equal [ "Alpha GBP", "Zeta EUR" ], entries[1].accounts.map(&:name)
+    assert_equal %w[Pear Monzo Apple], cash_group.sidebar_entries(order: AccountOrder.new("name_desc")).map(&:name)
+  end
+
+  test "with a balance order a bundle sorts by its total in the family's currency" do
+    create_account("Big", balance: 50)
+    create_account("Wise A", balance: 30, institution: "Wise")
+    create_account("Wise B", balance: 40, institution: "Wise")
+    create_account("Small", balance: 10)
+
+    assert_equal %w[Wise Big Small], cash_group.sidebar_entries(order: AccountOrder.new("balance_desc")).map(&:name)
+    assert_equal %w[Small Big Wise], cash_group.sidebar_entries(order: AccountOrder.new("balance_asc")).map(&:name)
+  end
+
   test "an institution with a single account stays a plain row" do
     create_account("Schwab", balance: 10, institution: "Schwab")
     create_account("Savings", balance: 10)

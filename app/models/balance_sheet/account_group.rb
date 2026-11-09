@@ -9,7 +9,7 @@ class BalanceSheet::AccountGroup
   # balances of a Wise account, say), shown in the sidebar as one entry with
   # their combined total: in their own currency when they all share one, else
   # in the family's.
-  InstitutionBundle = Data.define(:key, :name, :accounts, :total, :currency) do
+  InstitutionBundle = Data.define(:key, :name, :accounts, :total, :currency, :converted_total) do
     include Monetizable
 
     monetize :total, as: :total_money
@@ -73,10 +73,27 @@ class BalanceSheet::AccountGroup
     accounts.any?(&:syncing?)
   end
 
-  # The group's sidebar rows, in order: an account, or a bundle where two or
-  # more accounts share an institution (by name, else domain, ignoring case
-  # and spacing). A bundle takes the place of its first account.
-  def sidebar_entries
+  # The group's sidebar rows: an account, or a bundle where two or more
+  # accounts share an institution (by name, else domain, ignoring case and
+  # spacing). With a name or balance order the rows sort by what each shows,
+  # a bundle by its institution's name or its total (balances compared in the
+  # family's currency); otherwise a bundle takes its first account's place.
+  # A bundle's accounts keep the group's order.
+  def sidebar_entries(order: nil)
+    entries = sidebar_rows
+    case order&.key
+    when "name_asc", "name_desc"
+      sorted = entries.each_with_index.sort_by { |entry, index| [ entry_name(entry).downcase, index ] }.map(&:first)
+      order.key == "name_desc" ? sorted.reverse : sorted
+    when "balance_asc", "balance_desc"
+      sorted = entries.each_with_index.sort_by { |entry, index| [ entry_balance(entry), index ] }.map(&:first)
+      order.key == "balance_desc" ? sorted.reverse : sorted
+    else
+      entries
+    end
+  end
+
+  private def sidebar_rows
     by_institution = accounts.group_by { |account| institution_key(account) }
     bundled = Set.new
 
@@ -94,7 +111,8 @@ class BalanceSheet::AccountGroup
         name: account.institution_name.presence || account.institution_domain,
         accounts: members,
         total: shared_currency ? counted.sum(&:balance) : counted.sum(&:converted_balance),
-        currency: shared_currency || currency
+        currency: shared_currency || currency,
+        converted_total: counted.sum(&:converted_balance)
       )
     end
   end
@@ -110,6 +128,14 @@ class BalanceSheet::AccountGroup
 
   private
     attr_reader :classification_group
+
+    def entry_name(entry)
+      entry.name.to_s
+    end
+
+    def entry_balance(entry)
+      entry.is_a?(InstitutionBundle) ? entry.converted_total : entry.converted_balance
+    end
 
     def institution_key(account)
       (account.institution_name.presence || account.institution_domain).to_s.downcase.squish.presence
