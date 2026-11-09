@@ -278,11 +278,11 @@ namespace :data_migration do
   end
 
   desc "Clear the Investment Contributions category from plain transfer legs"
-  # 2026-11-03: legs that became plain transfers (funds_movement, cc_payment)
-  # through a sync, a match or reconcile_investment_transfer_kinds kept the
-  # Investment Contributions category of their old kind, so they still show
-  # under that category. Clears it unless the user locked the category.
-  # Idempotent.
+  # Clears the Investment Contributions category from legs whose kind is now a
+  # plain transfer (funds_movement, cc_payment) but which still carry the
+  # category of their old kind, as a sync, a match or
+  # reconcile_investment_transfer_kinds can leave them, unless the user locked
+  # the category. Idempotent.
   #
   # Run reconcile_investment_transfer_kinds first. A leg still stored as a
   # plain transfer whose transfer makes it a contribution can carry a

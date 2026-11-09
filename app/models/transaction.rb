@@ -76,7 +76,7 @@ class Transaction < ApplicationRecord
   def self.drop_automatic_category_claims!(ids)
     enrichments = DataEnrichment.where(enrichable_type: "Transaction", enrichable_id: ids, attribute_name: "category_id")
     enrichments.where(source: "ai").delete_all
-    enrichments.where(source: "bayes").update_all([ "metadata = metadata - ?", "locked_by_bayes" ])
+    enrichments.where(source: "bayes").drop_metadata_flag!("locked_by_bayes")
   end
 
   # Accessors for exchange_rate stored in extra jsonb field
