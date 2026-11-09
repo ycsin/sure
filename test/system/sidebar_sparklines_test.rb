@@ -209,6 +209,53 @@ class SidebarSparklinesTest < ApplicationSystemTestCase
     end
   end
 
+  # A Turbo visit replaces the page body, sidebar included. The sparklines sit
+  # in permanent wrappers so the next page takes over the charts already drawn
+  # rather than starting every frame from its placeholder and fetching it again.
+  test "a visit keeps the sparklines already drawn instead of fetching them again" do
+    visit root_path
+    expand_first_group
+    assert_selector "#{ACCOUNT_SPARKLINE_FRAME}[complete] svg path", minimum: 1
+    kept = mark_drawn_sparklines
+    record_sparkline_requests
+
+    visit_first_open_account
+
+    assert_equal kept, page.evaluate_script("document.querySelectorAll(#{"#{SPARKLINE_FRAME}[data-kept]".to_json}).length"), "the drawn sparklines were replaced"
+    assert_selector "#{ACCOUNT_SPARKLINE_FRAME}[data-kept][complete] svg path", minimum: 1
+    assert_empty page.evaluate_script("window.sparklineRequests").select { |id| id.start_with?("sparkline_account_") }
+  end
+
+  test "a visit fetches a sparkline again once its series has changed" do
+    visit root_path
+    expand_first_group
+    assert_selector "#{ACCOUNT_SPARKLINE_FRAME}[complete] svg path", minimum: 1
+    mark_drawn_sparklines
+
+    FreshSparklineVersions.salt = SecureRandom.hex(4)
+    visit_first_open_account
+
+    assert_no_selector "#{SPARKLINE_FRAME}[data-kept]", visible: :all
+    assert_selector "#{ACCOUNT_SPARKLINE_FRAME}[complete] svg path", minimum: 1
+  end
+
+  test "a sparkline that timed out is not carried to the next page" do
+    with_short_sparkline_timeout do
+      visit root_path
+
+      with_stalled_sparkline_responses do
+        expand_first_group
+        assert_selector "#{ACCOUNT_SPARKLINE_FRAME} p", text: BADGE_TEXT, minimum: 1
+      end
+
+      assert page.evaluate_script(<<~JS), "a wrapper around a timed-out sparkline is still permanent"
+        Array.from(document.querySelectorAll("#{ACCOUNT_SPARKLINE_FRAME}"))
+          .filter((frame) => frame.textContent.includes("#{BADGE_TEXT}"))
+          .every((frame) => !frame.closest("[data-turbo-permanent]"))
+      JS
+    end
+  end
+
   # Only a response that renders the frame ends the wait; one without it is as
   # much a failed sparkline as a request that never returns. Each response has
   # to arrive inside the window, otherwise the badge would be there before it
@@ -272,6 +319,33 @@ class SidebarSparklinesTest < ApplicationSystemTestCase
       response_times = page.evaluate_script("window.sparklineResponseTimes")
       assert_not_empty response_times
       assert response_times.all? { |time| time < ms }, "Sparkline responses took #{response_times.map(&:round)} ms"
+    end
+
+    # Tags every drawn sparkline frame, so a frame on the next page can be told
+    # apart as the same element (carried over) or a new one.
+    def mark_drawn_sparklines
+      page.evaluate_script(<<~JS)
+        (() => {
+          const frames = document.querySelectorAll("#{SPARKLINE_FRAME}[complete]")
+          frames.forEach((frame) => { frame.dataset.kept = "1" })
+          return frames.length
+        })()
+      JS
+    end
+
+    def record_sparkline_requests
+      page.execute_script(<<~JS)
+        window.sparklineRequests = []
+        document.addEventListener("turbo:before-fetch-request", (event) => {
+          if (event.target.id.includes("sparkline")) window.sparklineRequests.push(event.target.id)
+        })
+      JS
+    end
+
+    # A Turbo visit, unlike `visit`, which loads the page afresh.
+    def visit_first_open_account
+      find("#sidebar-scroll details[open] a[href^='/accounts/']", match: :first).click
+      assert_selector "#sidebar-scroll a[data-active-account]"
     end
 
     def expand_first_group

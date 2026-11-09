@@ -25,7 +25,7 @@
 
   <div class="ml-6 pl-2 border-l border-secondary space-y-1 mt-1">
     <% bundle.accounts.each do |account| %>
-      <%= render "accounts/sidebar_account_row", account: account, account_group: account_group, show_logo: false %>
+      <%= render "accounts/sidebar_account_row", account: account, account_group: account_group, copy: account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile), show_logo: false %>
     <% end %>
   </div>
 <% end %>

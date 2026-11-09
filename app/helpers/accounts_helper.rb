@@ -48,6 +48,17 @@ module AccountsHelper
   # since they only feed into a cache key (concat-stable, never coerced).
   # Versions for the sidebar's sparkline URLs, keyed by account id and by group
   # accountable, computed together rather than per account.
+  # The id of the permanent wrapper around a sidebar sparkline frame. On a
+  # Turbo visit, an element marked data-turbo-permanent is carried over to the
+  # new page when that page has one with the same id, so the chart already
+  # drawn stays instead of being fetched and drawn again. The id names the copy
+  # of the sidebar it sits in (each tab panel, and the mobile one), since ids
+  # must be unique, and the series version, so a chart whose data changed is
+  # replaced by a fresh frame.
+  def sidebar_sparkline_wrapper_id(copy, subject, version)
+    "sparkline_keep_#{copy}_#{subject}_#{Digest::MD5.hexdigest(version.to_s)[0, 12]}"
+  end
+
   def sidebar_sparkline_versions(family)
     @sidebar_sparkline_versions ||= begin
       groups = family.balance_sheet.account_groups
@@ -70,7 +81,7 @@ module AccountsHelper
       .pick(Arel.sql("count(*)"), Arel.sql("max(account_providers.updated_at)"))
 
     [
-      family.build_cache_key("account_sidebar_tabs_v8", invalidate_on_data_updates: true),
+      family.build_cache_key("account_sidebar_tabs_v9", invalidate_on_data_updates: true),
       Current.user&.id,
       shares_version,
       providers_version,
