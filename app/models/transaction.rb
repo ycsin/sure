@@ -316,6 +316,16 @@ class Transaction < ApplicationRecord
     sanitize_sql_array([ "#{sql})", { attribute: attribute, sources: sources.flatten.map(&:to_s), since: since, metadata: metadata&.to_json } ])
   end
 
+  # Marks the AI's and Bayes' category enrichments of the given transactions
+  # superseded: their category changed, so it is no longer the value they
+  # recorded as theirs, even where it later equals it again. Callers hold the
+  # transactions' row locks, so the enrichments are locked after them, as a
+  # save followed by Enrichable#log_enrichment locks them.
+  def self.supersede_automatic_category_claims!(transaction_ids)
+    DataEnrichment.where(enrichable_type: name, enrichable_id: transaction_ids, attribute_name: "category_id", source: AUTO_CATEGORY_SOURCES)
+                  .update_all(Arel.sql(%(metadata = COALESCE(metadata, '{}'::jsonb) || '{"superseded": true}'::jsonb)))
+  end
+
   # Family-scoped query for Enrichable#clear_ai_cache
   def self.family_scope(family)
     joins(entry: :account).where(accounts: { family_id: family.id })
@@ -353,6 +363,9 @@ class Transaction < ApplicationRecord
       # entry being touched. Locks are taken transactions-first, matching a
       # normal save; sliced to bound the entries UPDATE on large merges.
       updated_ids.each_slice(REASSIGN_TOUCH_BATCH_SIZE) do |batch|
+        # The UPDATE skips the after_save that ends the automatic
+        # categorizers' claims, so end them here for the rows reassigned.
+        supersede_automatic_category_claims!(batch)
         Entry.where(entryable_type: "Transaction", entryable_id: batch).touch_all
       end
 
@@ -790,7 +803,6 @@ class Transaction < ApplicationRecord
     # rewrites its record's metadata right after the save
     # (Enrichable#log_enrichment), so only someone else's change ends a claim.
     def supersede_automatic_category_claims
-      data_enrichments.where(attribute_name: "category_id", source: AUTO_CATEGORY_SOURCES)
-                      .update_all(Arel.sql(%(metadata = COALESCE(metadata, '{}'::jsonb) || '{"superseded": true}'::jsonb)))
+      self.class.supersede_automatic_category_claims!([ id ])
     end
 end

@@ -173,6 +173,16 @@ module Enrichable
     removed_count = 0
 
     ActiveRecord::Base.transaction do
+      # The record first, then its enrichments, in the order a save followed by
+      # log_enrichment (or a category change ending a claim) locks them, so the
+      # two cannot deadlock. It also reads the values as they stand under lock.
+      # A record deleted since it was loaded took its enrichments with it.
+      begin
+        lock!
+      rescue ActiveRecord::RecordNotFound
+        return 0
+      end
+
       ai_enrichments = data_enrichments.where(source: "ai")
 
       # Only unlock attributes where current value still matches what AI set
