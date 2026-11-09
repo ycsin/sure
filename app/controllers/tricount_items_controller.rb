@@ -108,6 +108,7 @@ class TricountItemsController < ApplicationController
 
     tricount_account.assign_member!(params[:member_uuid])
     tricount_account.ensure_account_provider!(account)
+    account.update!(institution_domain: TricountItem::INSTITUTION[:domain]) if account.read_attribute(:institution_domain).blank?
     tricount_item.sync_later unless tricount_item.syncing?
 
     redirect_to account_path(account), notice: t(".success", account_name: account.name)
@@ -132,6 +133,8 @@ class TricountItemsController < ApplicationController
       return redirect_to(setup_accounts_tricount_item_path(@tricount_item), alert: t(".member_required"))
     end
 
+    @tricount_item.update!(prefix_account_names: params[:prefix_account_names] == "1")
+
     created = 0
     chosen.each do |tricount_account_id, config|
       tricount_account = @tricount_item.unlinked_tricount_accounts.find_by(id: tricount_account_id)
@@ -140,9 +143,11 @@ class TricountItemsController < ApplicationController
       TricountAccount.transaction do
         tricount_account.assign_member!(config["member_uuid"])
         account = Current.family.accounts.create!(
-          name: tricount_account.name,
+          name: @tricount_item.account_name_for(tricount_account),
           balance: tricount_account.current_balance || 0,
           currency: tricount_account.currency,
+          institution_name: TricountItem::INSTITUTION[:name],
+          institution_domain: TricountItem::INSTITUTION[:domain],
           accountable: Depository.new
         )
         tricount_account.ensure_account_provider!(account)

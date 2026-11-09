@@ -26,6 +26,7 @@ class TricountItemsControllerTest < ActionDispatch::IntegrationTest
 
     item = @family.tricount_items.order(:created_at).last
     assert_equal [ SHARING_TOKEN ], item.sharing_token_list
+    assert_equal [ "Tricount", "tricount.com", "https://tricount.com" ], [ item.institution_name, item.institution_domain, item.institution_url ]
     assert item.syncing?
   end
 
@@ -52,6 +53,17 @@ class TricountItemsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to accounts_url
     assert_equal [ "Weekend trip", "Depository", BigDecimal("-20"), "EUR" ], [ account.name, account.accountable_type, account.balance, account.currency ]
     assert_equal ME, tricount_account.member_uuid
+    assert_equal [ "Tricount", "tricount.com" ], [ account.read_attribute(:institution_name), account.read_attribute(:institution_domain) ]
+  end
+
+  test "accounts can be named with a Tricount prefix, and the choice is remembered" do
+    item, tricount_account = followed_item
+
+    post complete_account_setup_tricount_item_url(item),
+      params: { prefix_account_names: "1", accounts: { tricount_account.id => { import: "1", member_uuid: ME } } }
+
+    assert_equal "Tricount: Weekend trip", tricount_account.reload.current_account.name
+    assert item.reload.prefix_account_names?
   end
 
   test "a tricount can't be set up without choosing a member" do
@@ -82,5 +94,6 @@ class TricountItemsControllerTest < ActionDispatch::IntegrationTest
 
     assert_redirected_to account_url(account)
     assert_equal [ account, SAM ], [ tricount_account.reload.current_account, tricount_account.member_uuid ]
+    assert_equal "tricount.com", account.reload.read_attribute(:institution_domain)
   end
 end

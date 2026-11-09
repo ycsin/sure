@@ -61,6 +61,14 @@
         </div>
       <% end %>
 
+      <% if @unlinked_accounts.any? %>
+        <%= tag.label for: "tricount-prefix-account-names", class: "flex items-center gap-3 cursor-pointer" do %>
+          <%= hidden_field_tag :prefix_account_names, "0", id: nil %>
+          <%= check_box_tag :prefix_account_names, "1", @tricount_item.prefix_account_names?, id: "tricount-prefix-account-names", class: "checkbox checkbox--dark" %>
+          <span class="text-sm text-primary"><%= t("tricount_items.setup_accounts.prefix_account_names") %></span>
+        <% end %>
+      <% end %>
+
       <div class="flex gap-3">
         <%= render DS::Button.new(
           text: t("tricount_items.setup_accounts.import_selected"),

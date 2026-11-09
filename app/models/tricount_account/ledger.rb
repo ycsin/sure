@@ -17,9 +17,14 @@
 #   between members (a settle-up, BALANCE in Tricount) is a transfer leg too.
 # Paying 100 of which 25 is yours shows 25 of spending, not 100, and the 75
 # the others owe you as the account's balance.
+#
+# A share split by ratio is stored rounded to the cent, while Tricount works
+# out balances from the exact ratios and rounds only the total, so the
+# stored shares can drift from Tricount's balance by a few cents. The balance
+# follows Tricount, and one rounding leg makes up the difference.
 class TricountAccount::Ledger
   Member = Data.define(:uuid, :name, :status)
-  Entry = Data.define(:uuid, :date, :description, :category, :type_transaction, :amount, :currency, :payer_uuid, :allocations)
+  Entry = Data.define(:uuid, :date, :description, :category, :type_transaction, :amount, :currency, :payer_uuid, :allocations, :exact_shares, :scale)
   Leg = Data.define(:external_id, :amount, :currency, :date, :name, :kind, :category, :entry)
 
   ACTIVE = "ACTIVE".freeze
@@ -60,7 +65,19 @@ class TricountAccount::Ledger
     entries.select { |entry| entry_active?(entry) }
   end
 
+  # What the group owes the member, as Tricount shows it: from the exact
+  # ratio shares, rounded once.
   def balance_for(member_uuid)
+    return BigDecimal("0") if member_uuid.blank?
+
+    exact = active_entries.sum(Rational(0)) do |entry|
+      entry.exact_shares.fetch(member_uuid, Rational(0)) - (entry.payer_uuid == member_uuid ? entry.amount.to_r : Rational(0))
+    end
+    BigDecimal(exact, 20).round(scale)
+  end
+
+  # The same from the shares as stored, each rounded to the cent.
+  def stored_balance_for(member_uuid)
     return BigDecimal("0") if member_uuid.blank?
 
     active_entries.sum(BigDecimal("0")) do |entry|
@@ -94,10 +111,27 @@ class TricountAccount::Ledger
       end
 
       legs
-    end
+    end.tap { |legs| append_rounding_leg(legs, member_uuid) }
   end
 
   private
+
+    # The cents between the stored shares and Tricount's balance, dated with
+    # the latest entry, so the legs add up to the balance.
+    def append_rounding_leg(legs, member_uuid)
+      difference = stored_balance_for(member_uuid) - balance_for(member_uuid)
+      return if difference.zero? || legs.empty?
+
+      latest = active_entries.max_by(&:date)
+      legs << Leg.new(
+        external_id: "rounding", amount: difference, currency: latest.currency, date: latest.date,
+        name: nil, kind: "funds_movement", category: nil, entry: latest
+      )
+    end
+
+    def scale
+      active_entries.map(&:scale).max || 2
+    end
 
     def entry_active?(entry)
       entry.uuid.present? && entry.date.present? && (entry.allocations.any? || entry.payer_uuid.present?)
@@ -119,6 +153,8 @@ class TricountAccount::Ledger
       end
 
       Entry.new(
+        exact_shares: exact_shares(raw, amount, allocations),
+        scale: raw.dig("amount", "value").to_s.split(".")[1].to_s.size,
         uuid: raw["uuid"].presence || raw["id"]&.to_s,
         date: parse_date(raw["date"]),
         description: raw["description"].to_s.strip,
@@ -136,6 +172,22 @@ class TricountAccount::Ledger
     def entry_category(raw)
       category = raw["category_custom"].presence || raw["category"].presence
       category == UNCATEGORIZED ? nil : category
+    end
+
+    # Each member's share before rounding: a RATIO allocation's exact part of
+    # what the fixed (AMOUNT) allocations leave of the entry.
+    def exact_shares(raw, amount, allocations)
+      ratio_allocations = Array(raw["allocations"]).select { |allocation| allocation["type"] == "RATIO" && allocation["share_ratio"].to_i.positive? }
+      total_ratio = ratio_allocations.sum { |allocation| allocation["share_ratio"].to_i }
+      exact = allocations.transform_values(&:to_r)
+      return exact if total_ratio.zero?
+
+      fixed = Array(raw["allocations"]).reject { |allocation| ratio_allocations.include?(allocation) }.sum(Rational(0)) { |allocation| decimal(allocation.dig("amount", "value")).to_r }
+      ratio_allocations.each do |allocation|
+        member_uuid = membership_uuid(allocation["membership"]) || allocation["membership_uuid"]
+        exact[member_uuid] = (amount.to_r - fixed) * allocation["share_ratio"].to_i / total_ratio if member_uuid
+      end
+      exact
     end
 
     def membership_uuid(membership)

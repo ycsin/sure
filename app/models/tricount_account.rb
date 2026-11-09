@@ -53,6 +53,7 @@ class TricountAccount < ApplicationRecord
       account_status: registry["status"],
       account_type: "tricount",
       provider: "tricount",
+      institution_metadata: TricountItem::INSTITUTION.transform_keys(&:to_s),
       raw_payload: registry.except("all_registry_entry"),
       raw_transactions_payload: entries
     )

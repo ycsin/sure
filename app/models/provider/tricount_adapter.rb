@@ -58,36 +58,15 @@ class Provider::TricountAdapter < Provider::Base
 
 
   def institution_domain
-    metadata = provider_account.institution_metadata
-    return nil unless metadata.present?
-
-    domain = metadata["domain"]
-    url = metadata["url"]
-
-    # Derive domain from URL if missing
-    if domain.blank? && url.present?
-      begin
-        domain = URI.parse(url).host&.gsub(/^www\./, "")
-      rescue URI::InvalidURIError
-        Rails.logger.warn("Invalid institution URL for Tricount account #{provider_account.id}: #{url}")
-      end
-    end
-
-    domain
+    TricountItem::INSTITUTION[:domain]
   end
 
   def institution_name
-    metadata = provider_account.institution_metadata
-    return nil unless metadata.present?
-
-    metadata["name"] || item&.institution_name
+    TricountItem::INSTITUTION[:name]
   end
 
   def institution_url
-    metadata = provider_account.institution_metadata
-    return nil unless metadata.present?
-
-    metadata["url"] || item&.institution_url
+    TricountItem::INSTITUTION[:url]
   end
 
   def institution_color

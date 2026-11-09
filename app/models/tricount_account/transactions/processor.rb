@@ -48,8 +48,14 @@ class TricountAccount::Transactions::Processor
     end
 
     def import_leg(leg)
-      paid = leg.external_id.end_with?(":paid")
-      name = paid ? I18n.t("tricount_items.transactions.paid_name", description: leg.name.presence || tricount_account.name) : leg.name.presence || tricount_account.name
+      name =
+        if leg.external_id == "rounding"
+          I18n.t("tricount_items.transactions.rounding_name")
+        elsif leg.external_id.end_with?(":paid")
+          I18n.t("tricount_items.transactions.paid_name", description: leg.name.presence || tricount_account.name)
+        else
+          leg.name.presence || tricount_account.name
+        end
 
       import_adapter.import_transaction(
         external_id: leg.external_id,

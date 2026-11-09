@@ -67,6 +67,27 @@ class TricountAccount::LedgerTest < ActiveSupport::TestCase
     assert_equal({ "u1" => nil, "u2" => "Market" }, categories)
   end
 
+  # 10.00 split three ways is stored as 3.33, 3.33 and 3.34; Tricount's own
+  # balance comes from the exact thirds.
+  test "the balance follows the exact ratio shares and a rounding leg makes up the stored cents" do
+    entries = 3.times.map do |i|
+      tricount_entry(uuid: "r#{i}", payer: ME, amount: "-10.00", allocations: { ME => "-3.33", SAM => "-3.33", KIM => "-3.34" }).tap do |entry|
+        entry["RegistryEntry"]["allocations"].each { |allocation| allocation["type"] = "RATIO"; allocation["share_ratio"] = 1 }
+      end
+    end
+    ledger = TricountAccount::Ledger.new(entries)
+
+    assert_equal BigDecimal("20.01"), ledger.stored_balance_for(ME)
+    assert_equal BigDecimal("20.00"), ledger.balance_for(ME)
+    rounding = ledger.legs_for(ME).find { |leg| leg.external_id == "rounding" }
+    assert_equal [ BigDecimal("0.01"), "funds_movement" ], [ rounding.amount, rounding.kind ]
+    assert_equal(-ledger.balance_for(ME), ledger.legs_for(ME).sum(&:amount))
+  end
+
+  test "no rounding leg when the stored shares add up exactly" do
+    assert_not @ledger.legs_for(ME).any? { |leg| leg.external_id == "rounding" }
+  end
+
   test "members are read from wrapped memberships" do
     members = TricountAccount::Ledger.members_from(tricount_registry)
 

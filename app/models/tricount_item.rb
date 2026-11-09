@@ -12,6 +12,11 @@ class TricountItem < ApplicationRecord
 
   enum :status, { good: "good", requires_update: "requires_update" }, default: :good
 
+  # Every tricount is Tricount's, whichever group it belongs to.
+  INSTITUTION = { name: "Tricount", domain: "tricount.com", url: "https://tricount.com" }.freeze
+
+  before_validation :assign_institution, on: :create
+
   # Helper to detect if ActiveRecord Encryption is configured for this app
   def self.encryption_ready?
     creds_ready = Rails.application.credentials.active_record_encryption.present?
@@ -33,6 +38,13 @@ class TricountItem < ApplicationRecord
 
   # The settings form's field for adding tricount links (see #add_sharing_links).
   attr_reader :sharing_links
+
+  # The name for a new account following this tricount.
+  def account_name_for(tricount_account)
+    return tricount_account.name unless prefix_account_names?
+
+    I18n.t("tricount_items.account_name_prefixed", name: tricount_account.name)
+  end
 
   belongs_to :family
   has_one_attached :logo, dependent: :purge_later
@@ -174,6 +186,12 @@ class TricountItem < ApplicationRecord
     else
       I18n.t("tricount_items.institution_summary.count", count: institutions.count)
     end
+  end
+
+  def assign_institution
+    self.institution_name = INSTITUTION[:name]
+    self.institution_domain = INSTITUTION[:domain]
+    self.institution_url = INSTITUTION[:url]
   end
 
   def credentials_configured?
