@@ -109,7 +109,7 @@ en:
         other: "%{count} expenses · %{currency}"
       member_label: You are
       member_prompt: Choose your name
-      prefix_account_names: "Name accounts \"Tricount: …\""
+      prefix_account_names: "Name accounts \"tricount: …\""
       waiting_for_sync: Your tricounts are syncing. This page will list them in a moment.
       import_selected: Create accounts
       creating: Creating accounts…
@@ -122,7 +122,7 @@ en:
       success:
         one: Created 1 Tricount account.
         other: "Created %{count} Tricount accounts."
-    account_name_prefixed: "Tricount: %{name}"
+    account_name_prefixed: "tricount: %{name}"
     transactions:
       paid_name: "%{description} (you paid)"
       rounding_name: Tricount rounding difference

@@ -62,7 +62,7 @@ class TricountItemsControllerTest < ActionDispatch::IntegrationTest
     post complete_account_setup_tricount_item_url(item),
       params: { prefix_account_names: "1", accounts: { tricount_account.id => { import: "1", member_uuid: ME } } }
 
-    assert_equal "Tricount: Weekend trip", tricount_account.reload.current_account.name
+    assert_equal "tricount: Weekend trip", tricount_account.reload.current_account.name
     assert item.reload.prefix_account_names?
   end
 
