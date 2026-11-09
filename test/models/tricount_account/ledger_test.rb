@@ -1,0 +1,75 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require_relative "../../support/tricount_test_helper"
+
+class TricountAccount::LedgerTest < ActiveSupport::TestCase
+  include TricountTestHelper
+
+  setup do
+    @ledger = TricountAccount::Ledger.new(tricount_entries)
+  end
+
+  test "a member's balance is their allocations less what they paid, over active entries" do
+    assert_equal BigDecimal("-20"), @ledger.balance_for(ME)
+    assert_equal BigDecimal("60"), @ledger.balance_for(SAM)
+    assert_equal BigDecimal("-40"), @ledger.balance_for(KIM)
+  end
+
+  test "the members' balances add up to zero" do
+    assert_equal 0, [ ME, SAM, KIM ].sum { |member| @ledger.balance_for(member) }
+  end
+
+  test "a deleted entry counts for nothing" do
+    assert_not_includes @ledger.active_entries.map(&:uuid), "e4"
+  end
+
+  test "what the member paid is a transfer leg and their share is spending" do
+    legs = @ledger.legs_for(ME).index_by(&:external_id)
+
+    assert_equal %w[e1:paid e1:share e2:share e3:share e5:paid e5:share], legs.keys.sort
+    assert_equal [ BigDecimal("-100"), "funds_movement", nil ], legs["e1:paid"].to_h.values_at(:amount, :kind, :category)
+    assert_equal [ BigDecimal("25"), "standard", "FOOD" ], legs["e1:share"].to_h.values_at(:amount, :kind, :category)
+    assert_equal [ BigDecimal("10"), "standard", "TRANSPORT" ], legs["e2:share"].to_h.values_at(:amount, :kind, :category)
+  end
+
+  test "a settle-up is a transfer leg, not spending" do
+    leg = @ledger.legs_for(ME).find { |candidate| candidate.external_id == "e3:share" }
+
+    assert_equal [ BigDecimal("65"), "funds_movement", nil ], leg.to_h.values_at(:amount, :kind, :category)
+  end
+
+  test "money the member received for the group is a transfer leg out and their share is income" do
+    legs = @ledger.legs_for(ME).index_by(&:external_id)
+
+    assert_equal [ BigDecimal("30"), "funds_movement" ], legs["e5:paid"].to_h.values_at(:amount, :kind)
+    assert_equal [ BigDecimal("-10"), "standard" ], legs["e5:share"].to_h.values_at(:amount, :kind)
+  end
+
+  # Sure's sign: positive is money out, so the account balance is minus the sum.
+  test "the legs add up to the member's balance" do
+    assert_equal(-@ledger.balance_for(ME), @ledger.legs_for(ME).sum(&:amount))
+    assert_equal(-@ledger.balance_for(SAM), @ledger.legs_for(SAM).sum(&:amount))
+  end
+
+  test "a member with no part in an entry gets no leg for it" do
+    assert_empty @ledger.legs_for(KIM).select { |leg| leg.entry.uuid.in?(%w[e2 e3]) }
+  end
+
+  test "an uncategorised entry has no category and a custom label wins over Tricount's category" do
+    entries = [
+      tricount_entry(uuid: "u1", payer: ME, amount: "-10", allocations: { ME => "-10" }, category: "UNCATEGORIZED"),
+      tricount_entry(uuid: "u2", payer: ME, amount: "-10", allocations: { ME => "-10" }, category: "GROCERIES").tap { |e| e["RegistryEntry"]["category_custom"] = "Market" }
+    ]
+
+    categories = TricountAccount::Ledger.new(entries).entries.to_h { |entry| [ entry.uuid, entry.category ] }
+
+    assert_equal({ "u1" => nil, "u2" => "Market" }, categories)
+  end
+
+  test "members are read from wrapped memberships" do
+    members = TricountAccount::Ledger.members_from(tricount_registry)
+
+    assert_equal [ [ ME, "Alex" ], [ SAM, "Sam" ], [ KIM, "Kim" ] ], members.map { |member| [ member.uuid, member.name ] }
+  end
+end

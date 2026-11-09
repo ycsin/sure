@@ -231,7 +231,8 @@ class Settings::ProvidersController < ApplicationController
       { key: "indexa_capital", title: "Indexa Capital",  turbo_id: "indexa_capital", partial: "indexa_capital_panel" },
       { key: "sophtron",       title: "Sophtron",        turbo_id: "sophtron",       partial: "sophtron_panel" },
       { key: "questrade",      title: "Questrade",       turbo_id: "questrade",      partial: "questrade_panel" },
-      { key: "sharesight",     title: "Sharesight",      turbo_id: "sharesight",     partial: "sharesight_panel" }
+      { key: "sharesight",     title: "Sharesight",      turbo_id: "sharesight",     partial: "sharesight_panel" },
+      { key: "tricount",       title: "Tricount",        turbo_id: "tricount",       partial: "tricount_panel" }
     ].freeze
 
     FAMILY_PANEL_KEYS = FAMILY_PANELS.map { |p| p[:key] }.freeze
@@ -267,7 +268,8 @@ class Settings::ProvidersController < ApplicationController
       "etoro"          => "EtoroItem",
       "trade_republic" => "TradeRepublicItem",
       "indexa_capital" => "IndexaCapitalItem",
-      "sophtron"       => "SophtronItem"
+      "sophtron"       => "SophtronItem",
+      "tricount"       => "TricountItem"
     }.freeze
 
     def load_provider_items(provider_key)
@@ -374,6 +376,7 @@ class Settings::ProvidersController < ApplicationController
       @questrade_items = Current.family.questrade_items.active.ordered.select(:id)
       @sharesight_items = Current.family.sharesight_items.active.ordered
       @fio_items = Current.family.fio_items.active.ordered
+      @tricount_items = Current.family.tricount_items.ordered.select(:id)
 
       # Wallet uploads are managed on iOS. Only expose linked accounts the
       # current admin can access, including connections that need repair.
@@ -429,7 +432,8 @@ class Settings::ProvidersController < ApplicationController
         "etoro"          => @etoro_items,
         "trade_republic" => @trade_republic_items,
         "indexa_capital" => @indexa_capital_items,
-        "sophtron"       => @sophtron_items
+        "sophtron"       => @sophtron_items,
+        "tricount"       => @tricount_items
       }
     end
 

@@ -26,6 +26,7 @@ class DataEnrichment < ApplicationRecord
     stashaway: "stashaway",
     synth: "synth",
     trade_republic: "trade_republic",
+    tricount: "tricount",
     truelayer: "truelayer",
     up: "up",
     wise: "wise"

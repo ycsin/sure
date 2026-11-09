@@ -1,0 +1,125 @@
+en:
+  tricount_items:
+    sync_status:
+      no_accounts: No accounts found
+      synced:
+        one: "%{count} account synced"
+        other: "%{count} accounts synced"
+      synced_with_setup: "%{linked} synced, %{unlinked} need setup"
+    institution_summary:
+      none: No institutions connected
+      count:
+        one: "%{count} institution"
+        other: "%{count} institutions"
+    errors:
+      provider_not_configured: Tricount provider is not configured
+    sync:
+      status:
+        importing: Importing accounts from Tricount...
+        processing: Processing transactions...
+        calculating: Calculating balances...
+        importing_data: Importing account data...
+        checking_setup: Checking account configuration...
+        needs_setup: "%{count} accounts need setup..."
+      success: Sync started
+    tricount_item:
+      accounts_need_setup: Accounts need setup
+      delete: Delete connection
+      deletion_in_progress: deletion in progress...
+      error: Error
+      more_accounts_available:
+        one: "%{count} more account available"
+        other: "%{count} more accounts available"
+      no_accounts_description: This connection has no linked accounts yet.
+      no_accounts_title: No accounts
+      provider_name: Tricount
+      requires_update: Connection needs update
+      setup_action: Set Up New Accounts
+      setup_description: "%{linked} of %{total} accounts linked. Choose account types for your newly imported Tricount accounts."
+      setup_needed: New accounts ready to set up
+      status: "Synced %{timestamp} ago"
+      status_never: Never synced
+      status_with_summary: "Last synced %{timestamp} ago - %{summary}"
+      syncing: Syncing...
+      total: Total
+      unlinked: Unlinked
+      update_credentials: Update credentials
+    index:
+      title: Tricount Connections
+    loading:
+      loading_message: Loading Tricount accounts...
+      loading_title: Loading
+    panel:
+      setup_instructions: "Follow a Tricount:"
+      step_1: In Tricount, open the tricount and tap Share, then copy its link.
+      step_2: Paste the link below (one per line to add several) and save.
+      step_3: Once it syncs, choose which member you are on the Accounts page.
+      how_it_works: Each tricount becomes a cash account whose balance is what the group owes you (negative when you owe the group). Your share of each expense is your spending; what you paid shows as a
+        transfer, so Sure can pair it with the card payment in your bank account.
+      unofficial_api: "Tricount has no public API: Sure reads tricounts the way the Tricount app does, and only reads. Anyone with a tricount's link can view and edit it, so Sure stores links encrypted."
+      fields:
+        sharing_links:
+          label: Tricount links
+          placeholder: "https://tricount.com/tAbCdEf123"
+          description: Links you add are kept; this field stays empty.
+      save_button: Follow tricounts
+      update_button: Add tricounts
+      status_configured:
+        one: Following 1 tricount.
+        other: "Following %{count} tricounts."
+      status_not_configured: Not following any tricount yet.
+    create:
+      default_name: Tricount
+      success: Following your tricounts. They will appear once synced.
+      invalid_links: "Paste a tricount link, such as https://tricount.com/tAbCdEf123."
+    update:
+      success: Tricounts added. They will appear once synced.
+      invalid_links: "Paste a tricount link, such as https://tricount.com/tAbCdEf123."
+    destroy:
+      success: Scheduled the Tricount connection for deletion.
+    preload_accounts:
+      no_credentials_configured: Add a tricount link in Settings > Providers first.
+    select_accounts:
+      no_credentials_configured: Add a tricount link in Settings > Providers first.
+    link_accounts:
+      no_credentials_configured: Add a tricount link in Settings > Providers first.
+    select_existing_account:
+      title: Link a tricount
+      header: Link a tricount
+      subtitle: "Choose the tricount, and which member you are, for %{account_name}"
+      linking_to: "Linking to:"
+      no_accounts: No tricounts left to link.
+      connect_hint: Add a tricount link in Settings > Providers, or wait for the next sync.
+      settings_link: Go to provider settings
+      link_button: Link
+      cancel_button: Cancel
+      no_credentials_configured: Add a tricount link in Settings > Providers first.
+    link_existing_account:
+      success: "Linked %{account_name} to its tricount."
+      provider_account_already_linked: That tricount is already linked to an account.
+      unsupported_account_type: A tricount can only be linked to a cash account.
+      member_required: Choose which member of the tricount you are.
+      no_credentials_configured: Add a tricount link in Settings > Providers first.
+    setup_accounts:
+      title: Set up your tricounts
+      subtitle: Choose the tricounts to follow and who you are in each
+      instructions: "Each tricount becomes a cash account following one member's position: what the group owes them, their share of each expense as spending, and what they paid as transfers."
+      details:
+        one: "1 expense · %{currency}"
+        other: "%{count} expenses · %{currency}"
+      member_label: You are
+      member_prompt: Choose your name
+      waiting_for_sync: Your tricounts are syncing. This page will list them in a moment.
+      import_selected: Create accounts
+      creating: Creating accounts…
+      cancel: Cancel
+      all_accounts_linked: All your tricounts are set up.
+    complete_account_setup:
+      no_accounts: Choose at least one tricount.
+      member_required: Choose which member you are for each tricount you follow.
+      creation_failed: No account could be created. Please try again.
+      success:
+        one: Created 1 Tricount account.
+        other: "Created %{count} Tricount accounts."
+    transactions:
+      paid_name: "%{description} (you paid)"
