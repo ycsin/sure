@@ -28,6 +28,7 @@ class Transaction < ApplicationRecord
   accepts_nested_attributes_for :taggings, allow_destroy: true
 
   after_save :clear_merchant_unlinked_association, if: :merchant_id_previously_changed?
+  after_save :supersede_automatic_category_claims, if: :saved_change_to_category_id?
 
   # Accessors for exchange_rate stored in extra jsonb field
   def exchange_rate
@@ -121,6 +122,10 @@ class Transaction < ApplicationRecord
 
   # DataEnrichment sources that represent automatic category assignment
   AUTO_CATEGORY_SOURCES = %w[ai bayes].freeze
+
+  # Excludes enrichments (aliased de) whose value a later change superseded;
+  # see #supersede_automatic_category_claims.
+  UNSUPERSEDED_ENRICHMENT_SQL = "de.metadata->>'superseded' IS DISTINCT FROM 'true'".freeze
 
   # Stored flag values that do not mark a transaction pending: the strings
   # ActiveModel::Type::Boolean casts to false, plus "" (which it casts to nil).
@@ -229,8 +234,9 @@ class Transaction < ApplicationRecord
 
   # Transactions whose attribute (category_id, merchant_id; internal callers
   # only) is still the value an automatic source set: that source's
-  # enrichment holds the current value. since: only enrichments written
-  # after it; metadata: only those whose metadata contains it.
+  # enrichment holds the current value and no change has superseded it since.
+  # since: only enrichments written after it; metadata: only those whose
+  # metadata contains it.
   def self.enriched_from_sql(attribute, *sources, since: nil, metadata: nil)
     sql = +<<~SQL.squish
       EXISTS (
@@ -240,6 +246,7 @@ class Transaction < ApplicationRecord
           AND de.attribute_name = :attribute
           AND de.source IN (:sources)
           AND de.value = to_jsonb(transactions.#{attribute}::text)
+          AND #{UNSUPERSEDED_ENRICHMENT_SQL}
     SQL
     sql << " AND de.updated_at > :since" if since
     sql << " AND de.metadata @> CAST(:metadata AS jsonb)" if metadata
@@ -707,5 +714,16 @@ class Transaction < ApplicationRecord
       return unless family
 
       FamilyMerchantAssociation.where(family: family, merchant: merchant).delete_all
+    end
+
+    # The AI's or Bayes' category counts as theirs while it is still the value
+    # they recorded, which a category changed away and back again would
+    # satisfy too. Any change marks their records superseded; the records stay
+    # as history (the "AI history" filter). A change the source makes itself
+    # rewrites its record's metadata right after the save
+    # (Enrichable#log_enrichment), so only someone else's change ends a claim.
+    def supersede_automatic_category_claims
+      data_enrichments.where(attribute_name: "category_id", source: AUTO_CATEGORY_SOURCES)
+                      .update_all(Arel.sql(%(metadata = COALESCE(metadata, '{}'::jsonb) || '{"superseded": true}'::jsonb)))
     end
 end
