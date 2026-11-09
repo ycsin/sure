@@ -1,0 +1,182 @@
+# frozen_string_literal: true
+
+class TricountItem < ApplicationRecord
+  include Syncable, Provided, Unlinking, DestroyableLater, ProviderDisconnectable
+
+  # Set to true once this provider implements removal of the data it imported, so
+  # a client may disconnect with disposition "discard". Left false until then:
+  # the capability is advertised to API clients, and claiming it without the
+  # implementation would tell a family their data was deleted when it was not.
+  # See Unlinking#unlink_all! and Financekit::Purge for the worked example.
+  self.supports_discard = false
+
+  enum :status, { good: "good", requires_update: "requires_update" }, default: :good
+
+  # Helper to detect if ActiveRecord Encryption is configured for this app
+  def self.encryption_ready?
+    creds_ready = Rails.application.credentials.active_record_encryption.present?
+    env_ready = ENV["ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY"].present? &&
+                ENV["ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY"].present? &&
+                ENV["ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT"].present?
+    creds_ready || env_ready
+  end
+
+  # A sharing token gives read and write access to its tricount, so it is a
+  # secret, as is the device's session token.
+  if encryption_ready?
+    encrypts :sharing_tokens
+    encrypts :session_token
+  end
+
+  validates :name, presence: true
+  validates :sharing_tokens, presence: true
+
+  # The settings form's field for adding tricount links (see #add_sharing_links).
+  attr_reader :sharing_links
+
+  belongs_to :family
+  has_one_attached :logo, dependent: :purge_later
+
+  has_many :tricount_accounts, dependent: :destroy
+  has_many :accounts, through: :tricount_accounts
+
+  scope :active, -> { where(scheduled_for_deletion: false) }
+  scope :ordered, -> { order(created_at: :desc) }
+  scope :needs_update, -> { where(status: :requires_update) }
+  # Family::Syncer discovers provider items reflectively and calls `syncable` on every
+  # `*_items` association whose model includes Syncable. Omitting this scope breaks the
+  # whole nightly family sync, not just this provider.
+  scope :syncable, -> { active }
+
+  def syncer
+    TricountItem::Syncer.new(self)
+  end
+
+
+  # Import data from provider API
+  def import_latest_tricount_data(sync: nil)
+    provider = tricount_provider
+    unless provider
+      Rails.logger.error "TricountItem #{id} - Cannot import: provider is not configured"
+      raise StandardError, I18n.t("tricount_items.errors.provider_not_configured")
+    end
+
+    TricountItem::Importer.new(self, tricount_provider: provider, sync: sync).import
+  rescue => e
+    Rails.logger.error "TricountItem #{id} - Failed to import data: #{e.message}"
+    raise
+  end
+
+  # Process linked accounts after data import
+  def process_accounts
+    return [] if tricount_accounts.empty?
+
+    results = []
+    linked_tricount_accounts.includes(account_provider: :account).each do |tricount_account|
+      begin
+        result = TricountAccount::Processor.new(tricount_account).process
+        results << { tricount_account_id: tricount_account.id, success: true, result: result }
+      rescue => e
+        Rails.logger.error "TricountItem #{id} - Failed to process account #{tricount_account.id}: #{e.message}"
+        results << { tricount_account_id: tricount_account.id, success: false, error: e.message }
+      end
+    end
+
+    results
+  end
+
+  # Schedule sync jobs for all linked accounts
+  def schedule_account_syncs(parent_sync: nil, window_start_date: nil, window_end_date: nil)
+    return [] if accounts.empty?
+
+    results = []
+    accounts.visible.each do |account|
+      begin
+        account.sync_later(
+          parent_sync: parent_sync,
+          window_start_date: window_start_date,
+          window_end_date: window_end_date
+        )
+        results << { account_id: account.id, success: true }
+      rescue => e
+        Rails.logger.error "TricountItem #{id} - Failed to schedule sync for account #{account.id}: #{e.message}"
+        results << { account_id: account.id, success: false, error: e.message }
+      end
+    end
+
+    results
+  end
+
+  def upsert_tricount_snapshot!(accounts_snapshot)
+    assign_attributes(
+      raw_payload: accounts_snapshot
+    )
+
+    save!
+  end
+
+  def has_completed_initial_setup?
+    accounts.any?
+  end
+
+  # Linked accounts (have AccountProvider association)
+  def linked_tricount_accounts
+    tricount_accounts.joins(:account_provider)
+  end
+
+  # Unlinked accounts (no AccountProvider association)
+  def unlinked_tricount_accounts
+    tricount_accounts.left_joins(:account_provider).where(account_providers: { id: nil })
+  end
+
+  def sync_status_summary
+    total_accounts = total_accounts_count
+    linked_count = linked_accounts_count
+    unlinked_count = unlinked_accounts_count
+
+    if total_accounts == 0
+      I18n.t("tricount_items.sync_status.no_accounts")
+    elsif unlinked_count == 0
+      I18n.t("tricount_items.sync_status.synced", count: linked_count)
+    else
+      I18n.t("tricount_items.sync_status.synced_with_setup", linked: linked_count, unlinked: unlinked_count)
+    end
+  end
+
+  def linked_accounts_count
+    tricount_accounts.joins(:account_provider).count
+  end
+
+  def unlinked_accounts_count
+    tricount_accounts.left_joins(:account_provider).where(account_providers: { id: nil }).count
+  end
+
+  def total_accounts_count
+    tricount_accounts.count
+  end
+
+  def institution_display_name
+    institution_name.presence || institution_domain.presence || name
+  end
+
+  def connected_institutions
+    tricount_accounts.includes(:account)
+                  .where.not(institution_metadata: nil)
+                  .map { |acc| acc.institution_metadata }
+                  .uniq { |inst| inst["name"] || inst["institution_name"] }
+  end
+
+  def institution_summary
+    institutions = connected_institutions
+    case institutions.count
+    when 0
+      I18n.t("tricount_items.institution_summary.none")
+    else
+      I18n.t("tricount_items.institution_summary.count", count: institutions.count)
+    end
+  end
+
+  def credentials_configured?
+    sharing_tokens.present?
+  end
+end

@@ -1,0 +1,92 @@
+# frozen_string_literal: true
+
+require "test_helper"
+require_relative "../../support/tricount_test_helper"
+
+class TricountAccount::ProcessorTest < ActiveSupport::TestCase
+  include TricountTestHelper
+
+  setup do
+    @family = families(:empty)
+    @item = @family.tricount_items.create!(name: "Tricount", sharing_tokens: SHARING_TOKEN)
+    @tricount_account = @item.tricount_accounts.new
+    @tricount_account.upsert_from_tricount!(tricount_registry)
+    @tricount_account.assign_member!(ME)
+    @account = @family.accounts.create!(name: "Weekend trip", balance: 0, currency: "EUR", accountable: Depository.new)
+    @tricount_account.ensure_account_provider!(@account)
+  end
+
+  def process!
+    TricountAccount::Processor.new(@tricount_account.reload).process
+  end
+
+  def tricount_entries_by_leg
+    @account.entries.where(source: "tricount").index_by(&:external_id)
+  end
+
+  test "the account balance is the member's position" do
+    process!
+
+    assert_equal BigDecimal("-20"), @account.reload.balance
+  end
+
+  test "each leg becomes a transaction, a paid leg as a transfer and a share as spending" do
+    process!
+    entries = tricount_entries_by_leg
+
+    assert_equal %w[e1:paid e1:share e2:share e3:share e5:paid e5:share], entries.keys.sort
+    assert_equal [ BigDecimal("-100"), "funds_movement" ], [ entries["e1:paid"].amount, entries["e1:paid"].entryable.kind ]
+    assert_equal I18n.t("tricount_items.transactions.paid_name", description: "Dinner"), entries["e1:paid"].name
+    assert_equal [ BigDecimal("25"), "standard", "Dinner" ], [ entries["e1:share"].amount, entries["e1:share"].entryable.kind, entries["e1:share"].name ]
+    assert_equal "funds_movement", entries["e3:share"].entryable.kind
+    assert_equal Date.new(2026, 10, 2), entries["e2:share"].date
+  end
+
+  test "a share takes the family's matching category" do
+    dining = @family.categories.create!(name: "Food & Drink", color: "#000000")
+
+    process!
+
+    assert_equal dining, tricount_entries_by_leg["e1:share"].entryable.category
+    assert_nil tricount_entries_by_leg["e2:share"].entryable.category, "no Transportation category to match"
+  end
+
+  test "an entry deleted in Tricount loses its transactions" do
+    process!
+    remaining = tricount_entries.reject { |entry| entry.dig("RegistryEntry", "uuid") == "e2" }
+    @tricount_account.upsert_from_tricount!(tricount_registry(entries: remaining))
+
+    process!
+
+    assert_not tricount_entries_by_leg.key?("e2:share")
+    assert_equal BigDecimal("-10"), @account.reload.balance
+  end
+
+  test "following another member replaces the transactions with theirs" do
+    process!
+    @tricount_account.assign_member!(SAM)
+
+    process!
+
+    assert_equal %w[e1:share e2:paid e2:share e3:paid e5:share], tricount_entries_by_leg.keys.sort
+    assert_equal BigDecimal("60"), @account.reload.balance
+  end
+
+  test "a paid leg pairs with the card payment it came from" do
+    card = @family.accounts.create!(name: "Card", balance: 0, currency: "EUR", accountable: Depository.new)
+    card.entries.create!(name: "Restaurant", amount: 100, currency: "EUR", date: Date.new(2026, 10, 1), entryable: Transaction.new)
+
+    process!
+    candidates = @family.transfer_match_candidates(account_id: @account.id)
+
+    assert candidates.any? { |match| match.inflow_transaction_id == tricount_entries_by_leg["e1:paid"].entryable_id }
+  end
+
+  test "an account without a member gets no transactions" do
+    @tricount_account.update!(member_uuid: nil, current_balance: nil)
+
+    process!
+
+    assert_empty tricount_entries_by_leg
+  end
+end
