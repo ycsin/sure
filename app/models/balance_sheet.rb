@@ -34,6 +34,13 @@ class BalanceSheet
     [ assets.account_groups, liabilities.account_groups ].flatten
   end
 
+  # The institution bundle with that slug among the user's accounts, or nil.
+  def institution_bundle(slug)
+    account_groups
+      .flat_map { |group| group.institution_bundles(institution_groups: family.institution_group_settings) }
+      .find { |bundle| bundle.slug == slug }
+  end
+
   def net_worth
     assets.total - liabilities.total
   end
