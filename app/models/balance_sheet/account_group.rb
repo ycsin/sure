@@ -7,7 +7,8 @@ class BalanceSheet::AccountGroup
 
   # Several accounts of the group held at one institution (the currency
   # balances of a Wise account, say), shown in the sidebar as one entry with
-  # their combined total in the family's currency.
+  # their combined total: in their own currency when they all share one, else
+  # in the family's.
   InstitutionBundle = Data.define(:key, :name, :accounts, :total, :currency) do
     include Monetizable
 
@@ -86,12 +87,14 @@ class BalanceSheet::AccountGroup
       next if bundled.include?(key)
 
       bundled << key
+      counted = BalanceSheet::ClassificationGroup.counted_accounts(members)
+      shared_currency = members.map(&:currency).uniq.one? ? members.first.currency : nil
       InstitutionBundle.new(
         key: key,
         name: account.institution_name.presence || account.institution_domain,
         accounts: members,
-        total: BalanceSheet::ClassificationGroup.counted_accounts(members).sum(&:converted_balance),
-        currency: currency
+        total: shared_currency ? counted.sum(&:balance) : counted.sum(&:converted_balance),
+        currency: shared_currency || currency
       )
     end
   end

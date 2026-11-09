@@ -27,6 +27,16 @@ class BalanceSheet::AccountGroupTest < ActiveSupport::TestCase
     assert_equal Money.new(250, @family.currency), bundle.total_money
   end
 
+  test "accounts at one institution sharing a currency show their total in that currency" do
+    ExchangeRate.create!(from_currency: "SGD", to_currency: @family.currency, date: Date.current, rate: 3)
+    create_account("DBS savings", balance: 100, currency: "SGD", institution: "DBS")
+    create_account("DBS salary", balance: 20, currency: "SGD", institution: "DBS")
+
+    bundle = cash_group.sidebar_entries.grep(BalanceSheet::AccountGroup::InstitutionBundle).sole
+
+    assert_equal Money.new(120, "SGD"), bundle.total_money
+  end
+
   test "an institution with a single account stays a plain row" do
     create_account("Schwab", balance: 10, institution: "Schwab")
     create_account("Savings", balance: 10)
