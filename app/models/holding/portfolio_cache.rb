@@ -8,6 +8,8 @@ class Holding::PortfolioCache
   # Sell; or no label) might be a split or a real zero, so its zero stays a
   # price (see #price_unpriced_trade_days).
   UNPRICED_SHARE_LABELS = (Trade::INTERNAL_MOVEMENT_LABELS + %w[Buy Dividend Reinvestment Interest Fee Contribution Withdrawal]).freeze
+  # Labels a trade at no price can carry when it is a split booked as a trade.
+  SPLIT_LIKE_LABELS = [ nil, "Other" ].freeze
 
   class SecurityNotFound < StandardError
     def initialize(security_id, account_id)
@@ -199,8 +201,12 @@ class Holding::PortfolioCache
 
         # A trade at no price that might be a split stays a barrier to the
         # nearest-price search even on a day another price outranks it (see
-        # #nearest_known_price).
-        barrier_dates = priced_trades.reject { |t| t.entryable.price&.positive? }.map(&:date).to_set
+        # #nearest_known_price). Only an unlabelled or "Other" trade might be
+        # one: a sale or an exchange at no price leaves the shares as they
+        # were, so that day's quote is in the same shares.
+        barrier_dates = priced_trades
+          .select { |t| !t.entryable.price&.positive? && SPLIT_LIKE_LABELS.include?(t.entryable.investment_activity_label) }
+          .map(&:date).to_set
 
         trade_prices = priced_trades
           .map do |trade|

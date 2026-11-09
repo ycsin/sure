@@ -264,6 +264,20 @@ class Holding::PortfolioCacheTest < ActiveSupport::TestCase
     assert_equal 0, cache.get_price(@security.id, 4.days.ago.to_date).price, "the quote may be in the shares after the split"
   end
 
+  # A sale or an exchange at no price leaves the shares as they were.
+  { "Sell" => "a sale", "Exchange" => "an exchange" }.each do |label, trade|
+    test "an earlier movement takes the quote on a day with #{trade} at no price" do
+      Security::Price.destroy_all
+      create_movement(@security, qty: 1, date: 4.days.ago.to_date)
+      create_movement(@security, qty: -1, date: 3.days.ago.to_date, label: label)
+      Security::Price.create!(security: @security, date: 3.days.ago.to_date, price: 100, currency: "USD")
+
+      cache = Holding::PortfolioCache.new(@account)
+
+      assert_equal 100, cache.get_price(@security.id, 4.days.ago.to_date).price
+    end
+  end
+
   test "a future price is scaled back across a split before it, even one not yet in effect" do
     security = Security.create!(name: "Future Split", ticker: "FSPL", exchange_operating_mic: "TEST")
     create_movement(security, qty: 1, date: Date.current)
