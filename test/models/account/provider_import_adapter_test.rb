@@ -839,20 +839,157 @@ class Account::ProviderImportAdapterTest < ActiveSupport::TestCase
     assert_equal [ 10, 10 ], account.holdings.where(date: Date.current, security: [ nyse, paris ]).order(:id).pluck(:qty).map(&:to_i)
   end
 
-  test "matches a same-day holding whose provider security has a blank exchange" do
+  test "a ticker without an exchange does not take over one of two listings stored without an id" do
     account, adapter, account_provider = provider_holding_setup
-    blank = Security.create!(ticker: "SAMEB", name: "Same Fund")
-    blank.update_column(:exchange_operating_mic, "")
-    listed = Security.create!(ticker: "SAMEB", name: "Same Fund", exchange_operating_mic: "XNAS")
+    nyse = Security.create!(ticker: "DUAL", name: "Dual Holdings Inc", exchange_operating_mic: "XNYS")
+    paris = Security.create!(ticker: "DUAL", name: "Duale SA", exchange_operating_mic: "XPAR")
+    bare = Security.create!(ticker: "DUAL", name: "Dual")
 
-    [ [ blank, "lot_blank" ], [ listed, "lot_listed" ] ].each do |security, external_id|
+    [ [ nyse, 10, nil ], [ paris, 10, nil ], [ bare, 5, "lot_bare" ] ].each do |security, qty, external_id|
+      adapter.import_holding(
+        security: security, quantity: qty, amount: qty * 100, currency: "USD", date: Date.current, price: 100,
+        external_id: external_id, source: "plaid", account_provider_id: account_provider.id
+      )
+    end
+
+    assert_equal [ [ bare.id, 5 ], [ nyse.id, 10 ], [ paris.id, 10 ] ].sort,
+      account.holdings.where(date: Date.current).where(provider_security: [ nyse, paris, bare ]).pluck(:provider_security_id, :qty).map { |id, qty| [ id, qty.to_i ] }.sort
+  end
+
+  # Two rows can share a provider security once one was remapped to another.
+  test "a listing does not claim one of two rows stored without an id or an exchange" do
+    account, adapter, account_provider = provider_holding_setup
+    blank = Security.create!(ticker: "TWOB", name: "Two Blank")
+    listed = Security.create!(ticker: "TWOB", name: "Two Blank", exchange_operating_mic: "XNAS")
+    remapped = Security.create!(ticker: "TWOR", name: "Remapped")
+    rows = [ blank, remapped ].map do |security|
+      account.holdings.create!(security: security, provider_security: blank, date: Date.current, currency: "USD",
+        qty: 10, price: 100, amount: 1000, account_provider_id: account_provider.id)
+    end
+
+    adapter.import_holding(
+      security: listed, quantity: 7, amount: 700, currency: "USD", date: Date.current, price: 100,
+      external_id: "lot_listed", source: "plaid", account_provider_id: account_provider.id
+    )
+
+    assert_equal [ nil, nil ], rows.map { |row| row.reload.external_id }
+    assert_equal [ 7 ], account.holdings.where(external_id: "lot_listed").pluck(:qty).map(&:to_i)
+  end
+
+  test "a listing does not claim one of two rows stored without an id on its exchange" do
+    account, adapter, account_provider = provider_holding_setup
+    # A provider security stored under the venue's legacy code, and the canonical listing.
+    listed = Security.create!(ticker: "TWOL", name: "Two Listed", exchange_operating_mic: "XWAR").tap { |s| s.update_column(:exchange_operating_mic, "WAR") }
+    incoming = Security.create!(ticker: "TWOL", name: "Two Listed", exchange_operating_mic: "XWAR")
+    remapped = Security.create!(ticker: "TWOR2", name: "Remapped")
+    rows = [ listed, remapped ].map do |security|
+      account.holdings.create!(security: security, provider_security: listed, date: Date.current, currency: "USD",
+        qty: 10, price: 100, amount: 1000, account_provider_id: account_provider.id)
+    end
+
+    adapter.import_holding(
+      security: incoming, quantity: 7, amount: 700, currency: "USD", date: Date.current, price: 100,
+      external_id: "lot_incoming", source: "plaid", account_provider_id: account_provider.id
+    )
+
+    assert_equal [ nil, nil ], rows.map { |row| row.reload.external_id }
+    assert_equal [ 7 ], account.holdings.where(external_id: "lot_incoming").pluck(:qty).map(&:to_i)
+  end
+
+  test "a listing on another exchange keeps a same-ticker row stored without an id apart" do
+    account, adapter, account_provider = provider_holding_setup
+    nyse = Security.create!(ticker: "DUAL", name: "Dual Holdings Inc", exchange_operating_mic: "XNYS")
+    paris = Security.create!(ticker: "DUAL", name: "Duale SA", exchange_operating_mic: "XPAR")
+
+    [ [ nyse, 10, nil ], [ paris, 7, "lot_paris" ] ].each do |security, qty, external_id|
+      adapter.import_holding(
+        security: security, quantity: qty, amount: qty * 100, currency: "USD", date: Date.current, price: 100,
+        external_id: external_id, source: "plaid", account_provider_id: account_provider.id
+      )
+    end
+
+    assert_equal [ [ nyse.id, 10, nil ], [ paris.id, 7, "lot_paris" ] ].sort_by(&:to_s),
+      account.holdings.where(date: Date.current, provider_security: [ nyse, paris ]).pluck(:provider_security_id, :qty, :external_id).map { |id, qty, ext| [ id, qty.to_i, ext ] }.sort_by(&:to_s)
+  end
+
+  test "matches a same-day holding stored without an id under a lower-case legacy exchange code" do
+    account, adapter, account_provider = provider_holding_setup
+    legacy = Security.create!(ticker: "WLEG", name: "Warsaw Legacy", exchange_operating_mic: "XWAR").tap { |s| s.update_column(:exchange_operating_mic, "war") }
+    canonical = Security.create!(ticker: "WLEG", name: "Warsaw Legacy", exchange_operating_mic: "XWAR")
+
+    [ [ legacy, nil ], [ canonical, "lot_canonical" ] ].each do |security, external_id|
+      adapter.import_holding(
+        security: security, quantity: 10, amount: 1000, currency: "PLN", date: Date.current, price: 100,
+        external_id: external_id, source: "plaid", account_provider_id: account_provider.id
+      )
+    end
+
+    assert_equal [ "lot_canonical" ], account.holdings.where(date: Date.current, provider_security: [ legacy, canonical ]).pluck(:external_id)
+  end
+
+  test "matches a same-day holding stored with a blank id" do
+    account, adapter, account_provider = provider_holding_setup
+    bare = Security.create!(ticker: "BLNK", name: "Blank Id Fund")
+    listed = Security.create!(ticker: "BLNK", name: "Blank Id Fund", exchange_operating_mic: "XNAS")
+
+    [ [ bare, "" ], [ listed, "lot_listed" ] ].each do |security, external_id|
       adapter.import_holding(
         security: security, quantity: 10, amount: 1000, currency: "USD", date: Date.current, price: 100,
         external_id: external_id, source: "plaid", account_provider_id: account_provider.id
       )
     end
 
-    assert_equal 1, account.holdings.where(date: Date.current, provider_security: [ blank, listed ]).count
+    assert_equal [ "lot_listed" ], account.holdings.where(date: Date.current, provider_security: [ bare, listed ]).pluck(:external_id)
+  end
+
+  test "matches a same-day holding stored without an id whose provider security has a blank exchange" do
+    account, adapter, account_provider = provider_holding_setup
+    blank = Security.create!(ticker: "SAMEB", name: "Same Fund")
+    blank.update_column(:exchange_operating_mic, "")
+    listed = Security.create!(ticker: "SAMEB", name: "Same Fund", exchange_operating_mic: "XNAS")
+
+    [ [ blank, nil ], [ listed, "lot_listed" ] ].each do |security, external_id|
+      adapter.import_holding(
+        security: security, quantity: 10, amount: 1000, currency: "USD", date: Date.current, price: 100,
+        external_id: external_id, source: "plaid", account_provider_id: account_provider.id
+      )
+    end
+
+    assert_equal [ "lot_listed" ], account.holdings.where(date: Date.current, provider_security: [ blank, listed ]).pluck(:external_id)
+  end
+
+  # External ids are unique per account, so a row with an id of its own is
+  # another position, whatever its exchange.
+  test "a listing without an exchange keeps a same-ticker position on another exchange apart" do
+    account, adapter, account_provider = provider_holding_setup
+    bare = Security.create!(ticker: "DUAL", name: "Dual Holdings Inc")
+    paris = Security.create!(ticker: "DUAL", name: "Duale SA", exchange_operating_mic: "XPAR")
+
+    [ [ bare, 10, "lot_nyse" ], [ paris, 7, "lot_paris" ] ].each do |security, qty, external_id|
+      adapter.import_holding(
+        security: security, quantity: qty, amount: qty * 100, currency: "USD", date: Date.current, price: 100,
+        external_id: external_id, source: "plaid", account_provider_id: account_provider.id
+      )
+    end
+
+    assert_equal [ [ bare.id, 10, "lot_nyse" ], [ paris.id, 7, "lot_paris" ] ].sort,
+      account.holdings.where(date: Date.current, provider_security: [ bare, paris ]).pluck(:provider_security_id, :qty, :external_id).map { |id, qty, ext| [ id, qty.to_i, ext ] }.sort
+  end
+
+  test "a position without an exchange stays apart from a same-ticker listing held with an id" do
+    account, adapter, account_provider = provider_holding_setup
+    paris = Security.create!(ticker: "DUAL", name: "Duale SA", exchange_operating_mic: "XPAR")
+    bare = Security.create!(ticker: "DUAL", name: "Dual Holdings Inc")
+
+    [ [ paris, 7, "lot_paris" ], [ bare, 10, "lot_nyse" ] ].each do |security, qty, external_id|
+      adapter.import_holding(
+        security: security, quantity: qty, amount: qty * 100, currency: "USD", date: Date.current, price: 100,
+        external_id: external_id, source: "plaid", account_provider_id: account_provider.id
+      )
+    end
+
+    assert_equal [ [ bare.id, 10, "lot_nyse" ], [ paris.id, 7, "lot_paris" ] ].sort,
+      account.holdings.where(date: Date.current, provider_security: [ bare, paris ]).pluck(:provider_security_id, :qty, :external_id).map { |id, qty, ext| [ id, qty.to_i, ext ] }.sort
   end
 
   test "a holding another provider already has today leaves the account saveable" do
@@ -893,12 +1030,27 @@ class Account::ProviderImportAdapterTest < ActiveSupport::TestCase
     assert_equal 1, account.holdings.where(security: security, date: Date.current).count
   end
 
-  test "matches a same-day holding whose ticker resolved without an exchange" do
+  test "a holding that fails validation leaves the account saveable" do
+    account, adapter, account_provider = provider_holding_setup
+    security = Security.create!(ticker: "SHRT", name: "Short Position Fund")
+
+    assert_raises(ActiveRecord::RecordInvalid) do
+      adapter.import_holding(
+        security: security, quantity: -5, amount: -500, currency: "USD", date: Date.current, price: 100,
+        external_id: "lot_short", source: "simplefin", account_provider_id: account_provider.id
+      )
+    end
+
+    assert_nothing_raised { account.update!(cash_balance: 0) }
+    assert_not account.holdings.where(security: security).exists?
+  end
+
+  test "matches a same-day holding stored without an id whose ticker resolved without an exchange" do
     account, adapter, account_provider = provider_holding_setup
     bare = Security.create!(ticker: "SAME", name: "Same Fund")
     listed = Security.create!(ticker: "SAME", name: "Same Fund", exchange_operating_mic: "XNAS")
 
-    [ [ bare, "lot_bare" ], [ listed, "lot_listed" ] ].each do |security, external_id|
+    [ [ bare, nil ], [ listed, "lot_listed" ] ].each do |security, external_id|
       adapter.import_holding(
         security: security,
         quantity: 10,
@@ -912,7 +1064,7 @@ class Account::ProviderImportAdapterTest < ActiveSupport::TestCase
       )
     end
 
-    assert_equal 1, account.holdings.where(date: Date.current, security: [ bare, listed ]).count
+    assert_equal [ "lot_listed" ], account.holdings.where(date: Date.current, provider_security: [ bare, listed ]).pluck(:external_id)
   end
 
   test "carries a remapped security forward to the next day's holding" do
