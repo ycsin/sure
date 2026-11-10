@@ -26,7 +26,7 @@ class TricountAccount::Processor
     account.broadcast_sync_complete
     Rails.logger.info "TricountAccount::Processor - Broadcast sync complete for account #{account.id}"
 
-    { transactions_processed: result[:total].positive?, transactions_removed: result[:removed] }
+    { transactions_processed: result[:total].positive?, transactions_removed: result[:removed], transactions_failed: result[:failed] }
   end
 
   private

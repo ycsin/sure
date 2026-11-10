@@ -25,8 +25,22 @@ class TricountItem::ImporterTest < ActiveSupport::TestCase
     assert_equal [ REGISTRY_UUID, "Weekend trip", "EUR" ], [ tricount_account.tricount_account_id, tricount_account.name, tricount_account.currency ]
     assert_equal [ "Alex", "Sam", "Kim" ], tricount_account.members.map(&:name)
     assert_equal 5, tricount_account.raw_transactions_payload.size
+    assert_equal 4, tricount_account.active_entry_count, "the deleted entry is left out"
     assert_not tricount_account.raw_payload.key?("all_registry_entry")
+    assert_not_includes [ tricount_account.raw_payload, tricount_account.raw_transactions_payload ].to_json, SHARING_TOKEN,
+      "the sharing token grants write access and stays only in the encrypted item"
     assert_nil tricount_account.current_balance, "no member chosen yet"
+  end
+
+  test "the tricount's currency is normalised, and an unknown one keeps the last good one" do
+    @provider.stubs(:synchronize!)
+    @provider.stubs(:registry).returns(tricount_registry.merge("currency" => "chf"))
+    import!
+    assert_equal "CHF", @item.tricount_accounts.sole.currency
+
+    @provider.stubs(:registry).returns(tricount_registry.merge("currency" => "XXX"))
+    import!
+    assert_equal "CHF", @item.tricount_accounts.sole.currency
   end
 
   test "a later import keeps the chosen member and updates the balance" do

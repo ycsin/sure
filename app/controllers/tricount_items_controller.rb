@@ -1,21 +1,8 @@
 # frozen_string_literal: true
 
 class TricountItemsController < ApplicationController
-  before_action :set_tricount_item, only: [ :show, :edit, :update, :destroy, :sync, :setup_accounts, :complete_account_setup ]
-
-  def index
-    @tricount_items = Current.family.tricount_items.ordered
-  end
-
-  def show
-  end
-
-  def new
-    @tricount_item = Current.family.tricount_items.build
-  end
-
-  def edit
-  end
+  before_action :require_admin!
+  before_action :set_tricount_item, only: [ :update, :destroy, :sync, :setup_accounts, :complete_account_setup ]
 
   # Starts following the tricounts behind the links given. A family has one
   # Tricount connection; adding more links later goes through #update.
@@ -87,6 +74,10 @@ class TricountItemsController < ApplicationController
 
   def select_existing_account
     @account = Current.family.accounts.find(params[:account_id])
+    # Family scoping alone would let an admin link a co-member's account they
+    # only hold read_write on.
+    return unless require_account_permission!(@account, :write, redirect_path: accounts_path)
+
     @tricount_item = configured_item
     return frame_redirect_to(settings_providers_path, alert: t(".no_credentials_configured")) unless @tricount_item
 
@@ -95,6 +86,8 @@ class TricountItemsController < ApplicationController
 
   def link_existing_account
     account = Current.family.accounts.find(params[:account_id])
+    return unless require_account_permission!(account, :write, redirect_path: accounts_path)
+
     tricount_item = configured_item
     return redirect_to(settings_providers_path, alert: t(".no_credentials_configured")) unless tricount_item
 

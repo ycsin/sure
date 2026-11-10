@@ -43,7 +43,7 @@
                 <div class="flex-1 min-w-0">
                   <p class="font-medium text-primary truncate"><%= tricount_account.name %></p>
                   <p class="text-xs text-secondary">
-                    <%= t("tricount_items.setup_accounts.details", count: tricount_account.ledger.active_entries.size, currency: tricount_account.currency) %>
+                    <%= t("tricount_items.setup_accounts.details", count: tricount_account.active_entry_count, currency: tricount_account.currency) %>
                   </p>
                 </div>
               <% end %>

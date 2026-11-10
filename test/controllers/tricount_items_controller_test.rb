@@ -32,8 +32,12 @@ class TricountItemsControllerTest < ActionDispatch::IntegrationTest
 
   test "a link that is not a tricount link is refused" do
     assert_no_difference -> { @family.tricount_items.count } do
-      post tricount_items_url, params: { tricount_item: { sharing_links: "https://example.com/" } }
+      post tricount_items_url, params: { tricount_item: { sharing_links: "https://example.com/" } }, headers: { "Accept" => "text/vnd.turbo-stream.html" }
     end
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, "border-destructive-subtle", "shown with DS::Alert"
+    assert_includes response.body, I18n.t("tricount_items.create.invalid_links")
   end
 
   test "adding a link keeps the tricounts already followed" do
@@ -95,5 +99,40 @@ class TricountItemsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to account_url(account)
     assert_equal [ account, SAM ], [ tricount_account.reload.current_account, tricount_account.member_uuid ]
     assert_equal "tricount.com", account.reload.read_attribute(:institution_domain)
+  end
+
+  test "linking submits outside the dialog's frame, so the account page reloads" do
+    followed_item
+    account = @family.accounts.create!(name: "Trip", balance: 0, currency: "EUR", accountable: Depository.new)
+
+    get select_existing_account_tricount_items_url(account_id: account.id)
+
+    assert_response :success
+    assert_select "form[action='#{link_existing_account_tricount_items_path}'][data-turbo-frame='_top']"
+  end
+
+  # Family scoping alone lets an admin reach a co-member's account; with the
+  # shares cleared the admin holds no permission on it at all.
+  test "an account the admin can't manage can't be linked" do
+    _item, tricount_account = followed_item
+    account = @family.accounts.create!(name: "Trip", balance: 0, currency: "EUR", accountable: Depository.new, owner: users(:family_member))
+    account.account_shares.destroy_all
+
+    get select_existing_account_tricount_items_url(account_id: account.id)
+    assert_redirected_to accounts_url
+    assert_equal I18n.t("accounts.not_authorized"), flash[:alert]
+
+    post link_existing_account_tricount_items_url, params: { account_id: account.id, tricount_account_id: tricount_account.id, member_uuid: SAM }
+    assert_redirected_to accounts_url
+    assert_nil tricount_account.reload.current_account
+  end
+
+  test "only an admin can follow a tricount" do
+    sign_in users(:family_member)
+
+    assert_no_difference -> { @family.tricount_items.count } do
+      post tricount_items_url, params: { tricount_item: { sharing_links: "https://tricount.com/#{SHARING_TOKEN}" } }
+    end
+    assert_redirected_to accounts_url
   end
 end

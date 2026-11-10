@@ -14,8 +14,11 @@ class TricountAccount::Transactions::Processor
   end
 
   def process
-    return { success: true, total: 0, imported: 0, failed: 0, removed: 0, errors: [] } unless account && tricount_account.member_uuid.present?
+    return { success: true, total: 0, imported: 0, failed: 0, removed: 0, errors: [] } unless account
 
+    # No legs when no member is followed (the one followed left the
+    # tricount), so the transactions imported for them are removed below,
+    # matching the balance, which drops to zero.
     legs = tricount_account.ledger.legs_for(tricount_account.member_uuid)
     imported = 0
     errors = []
@@ -52,7 +55,9 @@ class TricountAccount::Transactions::Processor
         if leg.external_id == "rounding"
           I18n.t("tricount_items.transactions.rounding_name")
         elsif leg.external_id.end_with?(":paid")
-          I18n.t("tricount_items.transactions.paid_name", description: leg.name.presence || tricount_account.name)
+          # A positive amount is money out of the tricount: received for the group.
+          key = leg.amount.positive? ? "received_name" : "paid_name"
+          I18n.t("tricount_items.transactions.#{key}", description: leg.name.presence || tricount_account.name)
         else
           leg.name.presence || tricount_account.name
         end
@@ -87,11 +92,14 @@ class TricountAccount::Transactions::Processor
     end
 
     # Removes this provider's transactions that no longer have a leg: the entry
-    # was deleted in Tricount, or the account follows another member now.
+    # was deleted in Tricount, or the account follows another member now. One
+    # the user edited, excluded or locked is theirs now and stays.
     def remove_stale_entries(external_ids)
       stale = account.entries.where(source: SOURCE, entryable_type: "Transaction").where.not(external_id: external_ids)
       count = 0
       stale.find_each do |entry|
+        next if entry.protected_from_sync?
+
         entry.destroy!
         count += 1
       end

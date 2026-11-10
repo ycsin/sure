@@ -18,7 +18,7 @@ class Provider::TricountAdapter < Provider::Base
     [ {
       key: "tricount",
       name: "Tricount",
-      description: "Follow your share of a Tricount's expenses",
+      description: I18n.t("tricount_items.provider_connection.description"),
       can_connect: true,
       new_account_path: ->(accountable_type, return_to) {
         Rails.application.routes.url_helpers.select_accounts_tricount_items_path(

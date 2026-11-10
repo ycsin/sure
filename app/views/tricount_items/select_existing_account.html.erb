@@ -29,6 +29,7 @@
           <%= form_with url: link_existing_account_tricount_items_path,
                         method: :post,
                         local: true,
+                        data: { turbo_frame: "_top" },
                         class: "border border-primary rounded-lg p-4 hover:bg-surface transition-colors" do |form| %>
             <%= hidden_field_tag :account_id, @account.id %>
             <%= hidden_field_tag :tricount_account_id, tricount_account.id %>

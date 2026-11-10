@@ -15,6 +15,7 @@ class TricountItem::Syncer
     # Phase 1: Import data from provider API
     sync.update!(status_text: I18n.t("tricount_items.sync.status.importing")) if sync.respond_to?(:status_text)
     tricount_item.import_latest_tricount_data(sync: sync)
+    sync_errors = import_errors(sync)
 
     # Phase 2: Collect setup statistics
     finalize_setup_counts(sync)
@@ -24,7 +25,7 @@ class TricountItem::Syncer
     if linked_tricount_accounts.any?
       sync.update!(status_text: I18n.t("tricount_items.sync.status.processing")) if sync.respond_to?(:status_text)
       mark_import_started(sync)
-      tricount_item.process_accounts
+      sync_errors.concat(processing_errors(tricount_item.process_accounts))
 
       # Phase 4: Schedule balance calculations
       sync.update!(status_text: I18n.t("tricount_items.sync.status.calculating")) if sync.respond_to?(:status_text)
@@ -39,8 +40,10 @@ class TricountItem::Syncer
       collect_transaction_stats(sync, account_ids: account_ids, source: "tricount")
     end
 
-    # Mark sync health
-    collect_health_stats(sync, errors: nil)
+    # A tricount that couldn't be read or an account that couldn't be
+    # processed leaves the sync complete but unhealthy.
+    capture_partial_failure(sync_errors) if sync_errors.any?
+    collect_health_stats(sync, errors: sync_errors.presence)
   rescue Provider::Tricount::AuthenticationError => e
     tricount_item.update!(status: :requires_update)
     collect_health_stats(sync, errors: [ { message: e.message, category: "auth_error" } ])
@@ -56,6 +59,35 @@ class TricountItem::Syncer
   end
 
   private
+
+    # The importer records a tricount it couldn't read in the sync's stats.
+    def import_errors(sync)
+      return [] unless sync.respond_to?(:sync_stats)
+
+      Array(sync.sync_stats&.dig("errors")).map { |error| error.to_h.stringify_keys.merge("category" => "import_error") }
+    end
+
+    def processing_errors(results)
+      Array(results).filter_map do |result|
+        if !result[:success]
+          { message: result[:error], category: "account_processing_error" }
+        elsif result.dig(:result, :transactions_failed).to_i.positive?
+          { message: I18n.t("tricount_items.sync.errors.transactions_failed", count: result.dig(:result, :transactions_failed)), category: "transaction_import_error" }
+        end
+      end
+    end
+
+    def capture_partial_failure(sync_errors)
+      DebugLogEntry.capture(
+        category: "provider_sync_error",
+        level: "warn",
+        message: "Tricount sync finished with #{sync_errors.size} error(s)",
+        source: self.class.name,
+        provider_key: "tricount",
+        family: tricount_item.family,
+        metadata: { tricount_item_id: tricount_item.id, errors: sync_errors }
+      )
+    end
 
     def mark_import_started(sync)
       # Mark that we're now processing imported data

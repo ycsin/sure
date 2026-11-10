@@ -37,6 +37,7 @@ class TricountAccount::ProcessorTest < ActiveSupport::TestCase
     assert_equal %w[e1:paid e1:share e2:share e3:share e5:paid e5:share], entries.keys.sort
     assert_equal [ BigDecimal("-100"), "funds_movement" ], [ entries["e1:paid"].amount, entries["e1:paid"].entryable.kind ]
     assert_equal I18n.t("tricount_items.transactions.paid_name", description: "Dinner"), entries["e1:paid"].name
+    assert_equal [ BigDecimal("30"), I18n.t("tricount_items.transactions.received_name", description: "Group refund") ], [ entries["e5:paid"].amount, entries["e5:paid"].name ]
     assert_equal [ BigDecimal("25"), "standard", "Dinner" ], [ entries["e1:share"].amount, entries["e1:share"].entryable.kind, entries["e1:share"].name ]
     assert_equal "funds_movement", entries["e3:share"].entryable.kind
     assert_equal Date.new(2026, 10, 2), entries["e2:share"].date
@@ -62,6 +63,17 @@ class TricountAccount::ProcessorTest < ActiveSupport::TestCase
     assert_equal BigDecimal("-10"), @account.reload.balance
   end
 
+  test "a transaction the user edited stays when its entry is deleted in Tricount" do
+    process!
+    tricount_entries_by_leg["e2:share"].update!(user_modified: true)
+    remaining = tricount_entries.reject { |entry| entry.dig("RegistryEntry", "uuid") == "e2" }
+    @tricount_account.upsert_from_tricount!(tricount_registry(entries: remaining))
+
+    process!
+
+    assert tricount_entries_by_leg.key?("e2:share")
+  end
+
   test "following another member replaces the transactions with theirs" do
     process!
     @tricount_account.assign_member!(SAM)
@@ -82,11 +94,16 @@ class TricountAccount::ProcessorTest < ActiveSupport::TestCase
     assert candidates.any? { |match| match.inflow_transaction_id == tricount_entries_by_leg["e1:paid"].entryable_id }
   end
 
-  test "an account without a member gets no transactions" do
-    @tricount_account.update!(member_uuid: nil, current_balance: nil)
+  test "an account whose member left the tricount loses their transactions" do
+    process!
+    registry = tricount_registry
+    registry["memberships"].reject! { |membership| membership.dig("RegistryMembershipNonUser", "uuid") == ME }
+    @tricount_account.upsert_from_tricount!(registry)
 
     process!
 
+    assert_nil @tricount_account.reload.member_uuid
     assert_empty tricount_entries_by_leg
+    assert_equal BigDecimal("0"), @account.reload.balance
   end
 end

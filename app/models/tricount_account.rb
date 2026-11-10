@@ -11,6 +11,10 @@ class TricountAccount < ApplicationRecord
   has_one :account, through: :account_provider, source: :account
   has_one :linked_account, through: :account_provider, source: :account
 
+  # A sharing token grants write access to its tricount, so it stays in the
+  # encrypted TricountItem#sharing_tokens and out of the stored snapshots.
+  CREDENTIAL_KEYS = %w[public_identifier_token].freeze
+
   validates :name, :currency, presence: true
 
   # Scopes
@@ -49,13 +53,13 @@ class TricountAccount < ApplicationRecord
     assign_attributes(
       tricount_account_id: (registry["uuid"].presence || registry["id"]).to_s,
       name: registry["title"].presence || registry["uuid"].to_s,
-      currency: registry["currency"].presence || currency || "EUR",
+      currency: parse_currency(registry["currency"]) || currency || "EUR",
       account_status: registry["status"],
       account_type: "tricount",
       provider: "tricount",
       institution_metadata: TricountItem::INSTITUTION.transform_keys(&:to_s),
-      raw_payload: registry.except("all_registry_entry"),
-      raw_transactions_payload: entries
+      raw_payload: without_credentials(registry.except("all_registry_entry")),
+      raw_transactions_payload: without_credentials(entries)
     )
     self.member_uuid = nil if member_uuid.present? && members.none? { |member| member.uuid == member_uuid }
     self.current_balance = member_uuid.present? ? ledger.balance_for(member_uuid) : nil
@@ -75,6 +79,11 @@ class TricountAccount < ApplicationRecord
     TricountAccount::Ledger.new(raw_transactions_payload)
   end
 
+  # Expenses, incomes and transfers still in the tricount (deleted ones left out).
+  def active_entry_count
+    ledger.active_entries.size
+  end
+
   # Chooses the member whose position this account follows.
   def assign_member!(uuid)
     raise ArgumentError, "Unknown Tricount member" unless members.any? { |candidate| candidate.uuid == uuid }
@@ -83,6 +92,14 @@ class TricountAccount < ApplicationRecord
   end
 
   private
+
+    def without_credentials(value)
+      case value
+      when Hash then value.except(*CREDENTIAL_KEYS).transform_values { |nested| without_credentials(nested) }
+      when Array then value.map { |nested| without_credentials(nested) }
+      else value
+      end
+    end
 
     def enqueue_connection_cleanup
       return unless tricount_item
@@ -94,6 +111,6 @@ class TricountAccount < ApplicationRecord
     end
 
     def log_invalid_currency(currency_value)
-      Rails.logger.warn("Invalid currency code '#{currency_value}' for Tricount account #{id}, defaulting to USD")
+      Rails.logger.warn("Invalid currency code '#{currency_value}' for Tricount account #{id}, keeping #{currency || "EUR"}")
     end
 end

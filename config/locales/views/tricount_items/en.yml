@@ -21,6 +21,10 @@ en:
         importing_data: Importing account data...
         checking_setup: Checking account configuration...
         needs_setup: "%{count} accounts need setup..."
+      errors:
+        transactions_failed:
+          one: "%{count} transaction could not be imported"
+          other: "%{count} transactions could not be imported"
       success: Sync started
     tricount_item:
       accounts_need_setup: Accounts need setup
@@ -35,7 +39,7 @@ en:
       provider_name: Tricount
       requires_update: Connection needs update
       setup_action: Set Up New Accounts
-      setup_description: "%{linked} of %{total} accounts linked. Choose account types for your newly imported Tricount accounts."
+      setup_description: "%{linked} of %{total} accounts linked. Choose which member you are in each newly found tricount."
       setup_needed: New accounts ready to set up
       status: "Synced %{timestamp} ago"
       status_never: Never synced
@@ -44,11 +48,8 @@ en:
       total: Total
       unlinked: Unlinked
       update_credentials: Update credentials
-    index:
-      title: Tricount Connections
-    loading:
-      loading_message: Loading Tricount accounts...
-      loading_title: Loading
+    provider_connection:
+      description: "Follow your share of a Tricount's expenses"
     panel:
       setup_instructions: "Follow a Tricount:"
       step_1: In Tricount, open the tricount and tap Share, then copy its link.
@@ -125,4 +126,5 @@ en:
     account_name_prefixed: "tricount: %{name}"
     transactions:
       paid_name: "%{description} (you paid)"
+      received_name: "%{description} (you received)"
       rounding_name: Tricount rounding difference
