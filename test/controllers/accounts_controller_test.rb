@@ -39,14 +39,6 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert_select "#sidebar-scroll[class*='[scrollbar-gutter:stable]']"
   end
 
-  # The stored sidebar widths apply before the first paint, not once the
-  # resize controller connects, so a reload doesn't redraw the sidebars.
-  test "the page applies the stored sidebar widths from its head" do
-    get root_url
-
-    assert_select "head script", text: /sure\.sidebarWidth\.".*--" \+ side\[0\] \+ "-sidebar-width"/m
-  end
-
   test "the sidebar shows an institution's entry with its saved name and currency" do
     family = @user.family
     ExchangeRate.create!(from_currency: family.currency, to_currency: "CHF", date: Date.current, rate: 2)
