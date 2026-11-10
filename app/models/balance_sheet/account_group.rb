@@ -53,6 +53,17 @@ class BalanceSheet::AccountGroup
 
     # The accounts' combined balance history in the bundle's currency, over
     # the accounts its total counts.
+    # Changes whenever the bundle's sparkline does: with any of its accounts'
+    # sparklines (Account#sparkline_version), the accounts in it, or the
+    # currency it is shown in. The sidebar passes the versions it already has.
+    def sparkline_version(account_versions = Account.sparkline_versions(accounts.map(&:account)))
+      Digest::SHA256.hexdigest([ slug, currency, *accounts.map { |account| account_versions[account.id] }.sort ].join("|")).first(16)
+    end
+
+    def sparkline_series
+      balance_series(period: Period.last_30_days)
+    end
+
     def balance_series(period:)
       Balance::ChartSeriesBuilder.new(
         account_ids: BalanceSheet::ClassificationGroup.counted_accounts(accounts).map(&:id),

@@ -48,7 +48,7 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     get root_url
 
     assert_select "details[data-institution-bundle='wise'] summary", minimum: 1 do
-      assert_select "p", text: "My Wise"
+      assert_select "a[href^='/institution_groups/']", text: "My Wise"
       assert_select "p.privacy-sensitive", text: Money.new(40, "CHF").format
     end
   end

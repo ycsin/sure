@@ -29,6 +29,17 @@ class InstitutionGroupsController < ApplicationController
     preload_entry_rows
   end
 
+  # The bundle's sidebar sparkline, like an account's (AccountsController#sparkline):
+  # a URL carrying the current version can't go stale, so the browser may reuse it.
+  def sparkline
+    version = @bundle.sparkline_version
+    expires_in 1.day if params[:v] == version
+    if stale?(etag: [ "institution_group_sparkline", version, Date.current ])
+      @sparkline_series = @bundle.sparkline_series
+      render layout: false
+    end
+  end
+
   def edit
     @institution_group = settings
   end

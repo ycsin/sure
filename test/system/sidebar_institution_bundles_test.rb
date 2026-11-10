@@ -77,6 +77,45 @@ class SidebarInstitutionBundlesTest < ApplicationSystemTestCase
     end
   end
 
+  test "an institution entry's total lines up with the account rows' balances" do
+    visit root_path
+    within("#asset_depository") { find("summary", match: :first).click }
+    find("#{BUNDLE} > summary [data-institution-bundle-toggle]").click
+
+    edges = page.evaluate_script(<<~JS)
+      (() => {
+        const group = document.querySelector("#asset_depository")
+        const right = (el) => Math.round(el.getBoundingClientRect().right)
+        const total = group.querySelector("details[data-institution-bundle='wise'] > summary .privacy-sensitive")
+        const row = Array.from(group.querySelectorAll("a[href^='/accounts/'] .privacy-sensitive")).find((el) => !el.closest("[data-institution-bundle]"))
+        return [right(total), right(row)]
+      })()
+    JS
+
+    assert_equal edges.second, edges.first, "the entry's total is not aligned with the rows' balances"
+  end
+
+  test "clicking an institution entry's row opens it in place" do
+    visit root_path
+    within("#asset_depository") { find("summary", match: :first).click }
+
+    find("#{BUNDLE} > summary .privacy-sensitive").click
+
+    assert_selector "#{BUNDLE}[open]"
+    assert_current_path root_path
+  end
+
+  test "an institution entry draws its accounts' combined sparkline" do
+    @user.family.accounts.where(institution_name: "Wise").each do |account|
+      [ 20, 0 ].each { |days| account.balances.create!(date: days.days.ago.to_date, balance: 10 + days, start_cash_balance: 10 + days, currency: account.currency) }
+    end
+
+    visit root_path
+    within("#asset_depository") { find("summary", match: :first).click }
+
+    assert_selector "#{BUNDLE} > summary turbo-frame[complete] [data-controller='time-series-chart'] svg path", wait: 10
+  end
+
   private
     def open_states
       evaluate_script(%([#{GROUP.to_json}, #{BUNDLE.to_json}].map(function (selector) { return document.querySelector(selector).open; })))

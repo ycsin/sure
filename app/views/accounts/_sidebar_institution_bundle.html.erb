@@ -1,8 +1,9 @@
 <%# locals: (bundle:, account_group:, mobile: false, all_tab: false) %>
 <%# Several accounts at one institution: one row with the institution's icon,
-    name and combined total, leading to their page, and a chevron opening
-    onto the accounts, indented under it. A link inside <summary> navigates
-    without toggling it, so only the chevron opens and closes the row. %>
+    name and combined total, opening onto the accounts, indented under it,
+    like an account group. The row is laid out like an account's, so the total
+    lines up with theirs; the name links to the institution's page (a link
+    inside <summary> navigates without toggling it). %>
 <% bundle_path = institution_group_path(bundle) %>
 <% active = page_active?(bundle_path) %>
 <% open = active || bundle.accounts.any? { |account| page_active?(account_path(account)) } %>
@@ -10,34 +11,43 @@
                 open: open,
                 class: "group/bundle",
                 data: { institution_bundle: bundle.key } do %>
-  <summary class="flex items-center gap-1 rounded-lg cursor-pointer list-none [&::-webkit-details-marker]:hidden"
-           title="<%= t("accounts.sidebar.institution_bundle_title", institution: bundle.name, count: bundle.accounts.size) %>">
-    <%= link_to bundle_path,
-          class: class_names(
-            "flex items-center gap-2 px-3 py-2 rounded-lg min-w-0 grow",
-            active ? "bg-container" : "hover:bg-surface-hover"
-          ),
-          data: active ? { active_account: true } : {} do %>
-      <% logo_key = Digest::MD5.hexdigest([ bundle.logo_url, bundle.name, account_group.color ].join("|"))[0, 12] %>
-      <%= tag.span id: "logo_keep_#{bundle.dom_id(account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile))}_#{logo_key}", class: "shrink-0", data: kept_element_data do %>
-        <%= render "accounts/logo", account: bundle.logo_account, url: bundle.logo_url, name: bundle.name, size: "sm", color: account_group.color %>
-      <% end %>
-
-      <div class="min-w-0 grow">
-        <%= tag.p bundle.name, class: class_names("text-sm text-primary font-medium truncate", "animate-pulse" => bundle.syncing?) %>
-        <p class="text-sm text-secondary truncate"><%= t("accounts.sidebar.institution_accounts", count: bundle.accounts.size) %></p>
-      </div>
-
-      <div class="ml-auto text-right shrink-0">
-        <%= tag.p format_money(bundle.total_money), class: "text-sm font-medium text-primary whitespace-nowrap privacy-sensitive" %>
-      </div>
+  <%= tag.summary class: class_names(
+                    "flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer list-none [&::-webkit-details-marker]:hidden",
+                    active ? "bg-container" : "hover:bg-surface-hover"
+                  ),
+                  title: t("accounts.sidebar.institution_bundle_title", institution: bundle.name, count: bundle.accounts.size) do %>
+    <% copy = bundle.dom_id(account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile)) %>
+    <% logo_key = Digest::MD5.hexdigest([ bundle.logo_url, bundle.name, account_group.color ].join("|"))[0, 12] %>
+    <%= tag.span id: "logo_keep_#{copy}_#{logo_key}", class: "shrink-0", data: kept_element_data do %>
+      <%= render "accounts/logo", account: bundle.logo_account, url: bundle.logo_url, name: bundle.name, size: "sm", color: account_group.color %>
     <% end %>
 
-    <span class="shrink-0 p-2 rounded-lg text-secondary hover:bg-surface-hover" data-institution-bundle-toggle>
-      <%= icon "chevron-down", size: "sm", class: "transition-transform group-open/bundle:rotate-180" %>
-      <span class="sr-only"><%= t("accounts.sidebar.institution_bundle_toggle", institution: bundle.name) %></span>
-    </span>
-  </summary>
+    <div class="min-w-0 grow">
+      <%= link_to bundle.name, bundle_path,
+            class: class_names("block text-sm text-primary font-medium truncate hover:underline", "animate-pulse" => bundle.syncing?),
+            data: active ? { active_account: true } : {} %>
+      <p class="flex items-center gap-1 text-sm text-secondary" data-institution-bundle-toggle>
+        <span class="truncate"><%= t("accounts.sidebar.institution_accounts", count: bundle.accounts.size) %></span>
+        <%= icon "chevron-down", size: "xs", class: "shrink-0 transition-transform group-open/bundle:rotate-180" %>
+        <span class="sr-only"><%= t("accounts.sidebar.institution_bundle_toggle", institution: bundle.name) %></span>
+      </p>
+    </div>
+
+    <div class="ml-auto text-right grow h-10">
+      <%= tag.p format_money(bundle.total_money), class: "text-sm font-medium text-primary whitespace-nowrap privacy-sensitive" %>
+      <% bundle_version = bundle.sparkline_version(sidebar_sparkline_versions(Current.family)) %>
+      <%= tag.div id: sidebar_sparkline_wrapper_id(copy, bundle.slug, bundle_version), data: kept_element_data do %>
+        <%= turbo_frame_tag "#{bundle.slug}_sparkline",
+                            src: sparkline_institution_group_path(bundle, v: bundle_version),
+                            loading: "lazy",
+                            data: sparkline_frame_data do %>
+          <div class="flex items-center w-8 h-4 ml-auto">
+            <div class="w-6 h-px bg-loader"></div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
 
   <div class="ml-6 pl-2 border-l border-secondary space-y-1 mt-1">
     <% bundle.accounts.each do |account| %>

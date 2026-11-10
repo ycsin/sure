@@ -27,6 +27,35 @@ class InstitutionGroupsControllerTest < ActionDispatch::IntegrationTest
     assert_not_includes names, "Not at Wise"
   end
 
+  test "the sparkline is the accounts' combined balance over the last 30 days" do
+    [ @eur, @gbp ].each_with_index do |account, index|
+      [ 30, 0 ].each { |days| account.balances.create!(date: days.days.ago.to_date, balance: 10 * (index + 1) + days, start_cash_balance: 10 * (index + 1) + days, currency: @family.currency) }
+    end
+
+    get sparkline_institution_group_url(bundle_slug)
+
+    assert_response :success
+    assert_select "turbo-frame##{bundle_slug}_sparkline"
+    series = JSON.parse(css_select("[data-controller='time-series-chart']").first["data-time-series-chart-data-value"])
+    assert_equal [ 90, 30 ], [ series["values"].first, series["values"].last ].map { |point| point.dig("value", "amount").to_d.to_i }
+  end
+
+  test "a sparkline URL carrying the current version may be reused by the browser" do
+    bundle = @family.balance_sheet.institution_bundle(bundle_slug)
+
+    get sparkline_institution_group_url(bundle_slug, v: bundle.sparkline_version)
+    assert_includes response.headers["Cache-Control"], "max-age=86400"
+
+    get sparkline_institution_group_url(bundle_slug, v: "stale")
+    assert_not_includes response.headers["Cache-Control"].to_s, "max-age=86400"
+  end
+
+  test "an unknown bundle has no sparkline" do
+    get sparkline_institution_group_url("depository-000000000000")
+
+    assert_response :not_found
+  end
+
   test "a range picked on the chart narrows the activity, and a preset period does not" do
     create_transaction(account: @eur, name: "Inside the range", date: 5.days.ago.to_date, currency: @family.currency)
     create_transaction(account: @gbp, name: "Before the range", date: 20.days.ago.to_date, currency: @family.currency)
