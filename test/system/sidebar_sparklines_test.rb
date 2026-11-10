@@ -243,6 +243,20 @@ class SidebarSparklinesTest < ApplicationSystemTestCase
     assert_equal kept, page.evaluate_script("document.querySelectorAll(\"[id^='logo_keep_'][data-kept]\").length"), "the logos were drawn again"
   end
 
+  test "a logo that failed to load is not carried to the next page" do
+    account = accounts(:depository)
+    account.logo.attach(io: StringIO.new("not an image"), filename: "broken.png", content_type: "image/png")
+
+    visit root_path
+    expand_first_group
+
+    wrapper = "[id^='logo_keep_'][id*='#{account.id}']"
+    assert_selector wrapper, minimum: 1
+    assert_no_selector "#{wrapper} img", wait: 10
+    assert page.evaluate_script(%(Array.from(document.querySelectorAll(#{wrapper.to_json})).filter((el) => el.offsetParent).every((el) => !el.hasAttribute("data-turbo-permanent")))),
+      "a wrapper whose logo failed is still permanent"
+  end
+
   test "a visit fetches a sparkline again once its series has changed" do
     visit root_path
     expand_first_group
