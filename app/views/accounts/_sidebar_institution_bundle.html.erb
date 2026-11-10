@@ -8,7 +8,9 @@
                 data: { institution_bundle: bundle.key } do %>
   <summary class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer list-none hover:bg-surface-hover [&::-webkit-details-marker]:hidden"
            title="<%= t("accounts.sidebar.institution_bundle_title", institution: bundle.name, count: bundle.accounts.size) %>">
-    <%= render "accounts/logo", account: bundle.logo_account, size: "sm", color: account_group.color %>
+    <%= tag.span id: sidebar_logo_wrapper_id(bundle.dom_id(account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile)), bundle.logo_account, account_group.color), class: "shrink-0", data: kept_element_data do %>
+      <%= render "accounts/logo", account: bundle.logo_account, size: "sm", color: account_group.color %>
+    <% end %>
 
     <div class="min-w-0 grow">
       <%= tag.p bundle.name, class: class_names("text-sm text-primary font-medium truncate", "animate-pulse" => bundle.syncing?) %>

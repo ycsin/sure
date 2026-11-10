@@ -15,7 +15,7 @@
       <div class="ml-auto text-right grow">
         <%= tag.p format_money(account_group.total_money), class: "text-sm font-medium text-primary privacy-sensitive" %>
         <% group_version = sidebar_sparkline_versions(Current.family)[account_group.accountable_type] %>
-        <%= tag.div id: sidebar_sparkline_wrapper_id(copy, "total", group_version), data: { turbo_permanent: true } do %>
+        <%= tag.div id: sidebar_sparkline_wrapper_id(copy, "total", group_version), data: kept_element_data do %>
           <%= turbo_frame_tag "#{account_group.key}_sparkline",
                               src: accountable_sparkline_path(account_group.key, v: group_version),
                               loading: "lazy",

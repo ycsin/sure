@@ -59,6 +59,20 @@ module AccountsHelper
     "sparkline_keep_#{copy}_#{subject}_#{Digest::MD5.hexdigest(version.to_s)[0, 12]}"
   end
 
+  # The id of the permanent wrapper around a sidebar account logo, for the
+  # same reason as the sparklines': a new <img> shows the initials beneath it
+  # until the image loads, so every visit flashed them. It changes with what
+  # the logo shows (the image, and the name and colour of the initials).
+  def sidebar_logo_wrapper_id(copy, account, color)
+    "logo_keep_#{copy}_#{account.id}_#{Digest::MD5.hexdigest([ account.logo_url, account.name, color ].join("|"))[0, 12]}"
+  end
+
+  # See kept_element_controller.js: a morph refresh never removes a permanent
+  # element, so one the refreshed page no longer has removes itself.
+  def kept_element_data
+    { turbo_permanent: true, controller: "kept-element", action: "turbo:before-render@document->kept-element#dropIfGone" }
+  end
+
   def sidebar_sparkline_versions(family)
     @sidebar_sparkline_versions ||= begin
       groups = family.balance_sheet.account_groups
@@ -81,7 +95,7 @@ module AccountsHelper
       .pick(Arel.sql("count(*)"), Arel.sql("max(account_providers.updated_at)"))
 
     [
-      family.build_cache_key("account_sidebar_tabs_v9", invalidate_on_data_updates: true),
+      family.build_cache_key("account_sidebar_tabs_v10", invalidate_on_data_updates: true),
       Current.user&.id,
       shares_version,
       providers_version,

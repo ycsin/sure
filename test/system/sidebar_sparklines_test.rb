@@ -226,6 +226,23 @@ class SidebarSparklinesTest < ApplicationSystemTestCase
     assert_empty page.evaluate_script("window.sparklineRequests").select { |id| id.start_with?("sparkline_account_") }
   end
 
+  test "a visit keeps the account logos instead of drawing them again" do
+    visit root_path
+    expand_first_group
+    kept = page.evaluate_script(<<~JS)
+      (() => {
+        const logos = document.querySelectorAll("#sidebar-scroll details[open] [id^='logo_keep_']")
+        logos.forEach((logo) => { logo.dataset.kept = "1" })
+        return logos.length
+      })()
+    JS
+    assert_operator kept, :>, 0
+
+    visit_first_open_account
+
+    assert_equal kept, page.evaluate_script("document.querySelectorAll(\"[id^='logo_keep_'][data-kept]\").length"), "the logos were drawn again"
+  end
+
   test "a visit fetches a sparkline again once its series has changed" do
     visit root_path
     expand_first_group
@@ -237,6 +254,36 @@ class SidebarSparklinesTest < ApplicationSystemTestCase
 
     assert_no_selector "#{SPARKLINE_FRAME}[data-kept]", visible: :all
     assert_selector "#{ACCOUNT_SPARKLINE_FRAME}[complete] svg path", minimum: 1
+  end
+
+  # A finished sync refreshes the page with a morph rather than a visit. Turbo
+  # never removes a permanent element during a morph, so a wrapper whose id
+  # the refreshed page no longer has would stay beside the new one.
+  test "a refresh after the series changed replaces each sparkline instead of adding one" do
+    visit root_path
+    expand_first_group
+    assert_selector "#{ACCOUNT_SPARKLINE_FRAME}[complete] svg path", minimum: 1
+    wrappers = sparkline_wrapper_count
+
+    2.times do
+      FreshSparklineVersions.salt = SecureRandom.hex(4)
+      morph_refresh
+      # The group totals sit in the summaries, on screen whatever the morph
+      # does to the groups' open state.
+      assert_selector "#{GROUP_SPARKLINE_FRAME}[complete] svg path", minimum: 1
+      assert_equal wrappers, sparkline_wrapper_count, "a refresh left the old sparklines beside the new ones"
+    end
+  end
+
+  test "a refresh with unchanged series keeps the sparklines drawn" do
+    visit root_path
+    expand_first_group
+    assert_selector "#{ACCOUNT_SPARKLINE_FRAME}[complete] svg path", minimum: 1
+    kept = mark_drawn_sparklines
+
+    morph_refresh
+
+    assert_equal kept, page.evaluate_script("document.querySelectorAll(#{"#{SPARKLINE_FRAME}[data-kept]".to_json}).length")
   end
 
   test "a sparkline that timed out is not carried to the next page" do
@@ -340,6 +387,17 @@ class SidebarSparklinesTest < ApplicationSystemTestCase
           if (event.target.id.includes("sparkline")) window.sparklineRequests.push(event.target.id)
         })
       JS
+    end
+
+    def sparkline_wrapper_count
+      page.evaluate_script("document.querySelectorAll('[id^=sparkline_keep_]').length")
+    end
+
+    # What the sync toast does once a sync has finished: refresh the page in
+    # place, which the layout's turbo_refreshes_with turns into a morph.
+    def morph_refresh
+      page.execute_script(%(window.__morphed = false; document.addEventListener("turbo:morph", () => { window.__morphed = true }, { once: true }); Turbo.visit(location.href, { action: "replace" })))
+      Timeout.timeout(15) { sleep 0.05 until page.evaluate_script("window.__morphed") }
     end
 
     # A Turbo visit, unlike `visit`, which loads the page afresh.
