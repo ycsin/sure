@@ -644,6 +644,30 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to account_url(@account, q: { search: "grocery" }, tab: "activity", page: nil, per_page: nil)
   end
 
+  test "clear_filter keeps the chart's range and view" do
+    delete clear_filter_account_url(@account), params: {
+      q: { start_date: "2026-01-05", end_date: "2026-02-10" },
+      start_date: "2026-01-05", end_date: "2026-02-10", chart_view: "balance",
+      param_key: "start_date",
+      param_value: "2026-01-05"
+    }
+
+    assert_redirected_to account_url(@account, q: { end_date: "2026-02-10" }, tab: "activity",
+                                               start_date: "2026-01-05", end_date: "2026-02-10", chart_view: "balance")
+  end
+
+  test "show's period links keep the activity filters but not the dates of the range they replace" do
+    get account_url(@account), params: {
+      start_date: "2026-01-05", end_date: "2026-02-10",
+      q: { start_date: "2026-01-05", end_date: "2026-02-10", search: "grocery" }
+    }
+
+    assert_response :success
+    preset = css_select("a[role='menuitemradio']").find { |link| link["href"].include?("period=last_90_days") }
+    query = Rack::Utils.parse_nested_query(URI.parse(preset["href"]).query)
+    assert_equal({ "search" => "grocery" }, query["q"])
+  end
+
   test "clear_filter drops the amount_operator once amount is cleared" do
     delete clear_filter_account_url(@account), params: {
       q: { amount: "50", amount_operator: "equal" },
