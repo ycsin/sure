@@ -48,6 +48,8 @@ class InstitutionGroupsController < ApplicationController
     @institution_group = settings
     @institution_group.assign_attributes(institution_group_params)
     @institution_group.member_accounts = @bundle.accounts
+    @institution_group.inherited_name = @bundle.inherited_name
+    @institution_group.inherited_domain = @bundle.inherited_domain
 
     if @institution_group.save
       flash[:notice] = t(".success")

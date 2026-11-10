@@ -47,6 +47,17 @@ class BalanceSheet::AccountGroup
       settings&.institution_domain
     end
 
+    # What the bundle takes from its accounts when its settings leave the
+    # name or the domain blank: the institution name they share (else the
+    # domain), and the domain most of them have.
+    def inherited_name
+      accounts.map(&:institution_name).find(&:present?) || inherited_domain
+    end
+
+    def inherited_domain
+      accounts.filter_map { |account| account.institution_domain.presence }.tally.max_by { |_, count| count }&.first
+    end
+
     def syncing?
       accounts.any?(&:syncing?)
     end
@@ -180,7 +191,7 @@ class BalanceSheet::AccountGroup
     InstitutionBundle.new(
       key: key,
       group_key: self.key,
-      name: settings&.name || first_account.institution_name.presence || first_account.institution_domain,
+      name: settings&.name || members.map(&:institution_name).find(&:present?) || first_account.institution_domain,
       accounts: members,
       total: total_in(counted, display_currency),
       currency: display_currency,

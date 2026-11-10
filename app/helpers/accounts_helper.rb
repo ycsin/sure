@@ -38,22 +38,32 @@ module AccountsHelper
   end
 
   # The same for an institution bundle's page, `/institution_groups/<slug>`.
+  # The rows of an account group's sidebar list: with manual ordering its
+  # accounts one by one (reordering works on single rows), otherwise its
+  # entries, where several accounts at one institution become one.
+  def sidebar_group_entries(account_group, sortable:)
+    return account_group.accounts if sortable
+
+    account_group.sidebar_entries(order: Current.user&.account_order, institution_groups: Current.family.institution_group_settings)
+  end
+
+  # Whether a group starts open: as the caller asks, else when it holds the
+  # page being viewed (an account's or an institution's), or the user keeps
+  # the group expanded.
+  def sidebar_group_open?(account_group, entries, open: nil)
+    return open unless open.nil?
+
+    active_slug = sidebar_active_institution_group_slug
+    entries.any? { |entry| entry.is_a?(BalanceSheet::AccountGroup::InstitutionBundle) && entry.slug == active_slug } ||
+      account_group.accounts.any? { |account| page_active?(account_path(account)) } ||
+      Current.user.always_expanded_account_group?(account_group.key)
+  end
+
   def sidebar_active_institution_group_slug
     match = request.path.match(%r{\A/institution_groups/([\w-]+)})
     match && match[1]
   end
 
-  # Cache key for `accounts/_account_sidebar_tabs.html.erb`.
-  # Kept here (not in the ERB) so the partial stays render-only.
-  #
-  # `shares_version` includes both row count and `max(updated_at)` because
-  # deleting a non-most-recent share would not move `max(updated_at)` and
-  # could otherwise serve stale fragments to a user who lost access.
-  # Both are pulled in a single SQL round-trip via `pick`. Note: Rails
-  # returns the values as Strings for raw SQL fragments — that's fine
-  # since they only feed into a cache key (concat-stable, never coerced).
-  # Versions for the sidebar's sparkline URLs, keyed by account id and by group
-  # accountable, computed together rather than per account.
   # The id of the permanent wrapper around a sidebar sparkline frame. On a
   # Turbo visit, an element marked data-turbo-permanent is carried over to the
   # new page when that page has one with the same id, so the chart already
@@ -68,9 +78,10 @@ module AccountsHelper
   # The id of the permanent wrapper around a sidebar account logo, for the
   # same reason as the sparklines': a new <img> shows the initials beneath it
   # until the image loads, so every visit flashed them. It changes with what
-  # the logo shows (the image, and the name and colour of the initials).
+  # the logo shows (the image, and the name and colour of the initials), not
+  # with its URL, which can change on every render (Account#logo_identity).
   def sidebar_logo_wrapper_id(copy, account, color)
-    "logo_keep_#{copy}_#{account.id}_#{Digest::MD5.hexdigest([ account.logo_url, account.name, color ].join("|"))[0, 12]}"
+    "logo_keep_#{copy}_#{account.id}_#{Digest::MD5.hexdigest([ account.logo_identity, account.name, color ].join("|"))[0, 12]}"
   end
 
   # See kept_element_controller.js: a morph refresh never removes a permanent
@@ -79,6 +90,17 @@ module AccountsHelper
     { turbo_permanent: true, controller: "kept-element", action: "turbo:before-render@document->kept-element#dropIfGone" }
   end
 
+  # Cache key for `accounts/_account_sidebar_tabs.html.erb`.
+  # Kept here (not in the ERB) so the partial stays render-only.
+  #
+  # `shares_version` includes both row count and `max(updated_at)` because
+  # deleting a non-most-recent share would not move `max(updated_at)` and
+  # could otherwise serve stale fragments to a user who lost access.
+  # Both are pulled in a single SQL round-trip via `pick`. Note: Rails
+  # returns the values as Strings for raw SQL fragments — that's fine
+  # since they only feed into a cache key (concat-stable, never coerced).
+  # Versions for the sidebar's sparkline URLs, keyed by account id and by group
+  # accountable, computed together rather than per account.
   def sidebar_sparkline_versions(family)
     @sidebar_sparkline_versions ||= begin
       groups = family.balance_sheet.account_groups
@@ -105,7 +127,7 @@ module AccountsHelper
       .pick(Arel.sql("count(*)"), Arel.sql("max(institution_groups.updated_at)"))
 
     [
-      family.build_cache_key("account_sidebar_tabs_v12", invalidate_on_data_updates: true),
+      family.build_cache_key("account_sidebar_tabs_v13", invalidate_on_data_updates: true),
       Current.user&.id,
       shares_version,
       providers_version,

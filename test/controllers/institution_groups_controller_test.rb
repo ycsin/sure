@@ -56,6 +56,28 @@ class InstitutionGroupsControllerTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  test "the settings form shows the name and domain the accounts give" do
+    [ @eur, @gbp ].each { |account| account.update!(institution_domain: "wise.com") }
+
+    get edit_institution_group_url(bundle_slug)
+
+    assert_select "input[name='institution_group[name]'][value='Wise']"
+    assert_select "input[name='institution_group[institution_domain]'][value='wise.com']"
+  end
+
+  test "saving the inherited name and domain unchanged keeps the bundle following its accounts" do
+    [ @eur, @gbp ].each { |account| account.update!(institution_domain: "wise.com") }
+
+    patch institution_group_url(bundle_slug), params: { institution_group: { name: "Wise", institution_domain: "wise.com", logo_account_id: "", currency: "" } }
+
+    settings = @family.institution_groups.find_by!(key: "wise")
+    assert_equal [ nil, nil ], [ settings.name, settings.institution_domain ]
+
+    patch institution_group_url(bundle_slug), params: { institution_group: { name: "My Wise", institution_domain: "wise.co.uk", logo_account_id: "", currency: "" } }
+
+    assert_equal [ "My Wise", "wise.co.uk" ], [ settings.reload.name, settings.institution_domain ]
+  end
+
   test "a range picked on the chart narrows the activity, and a preset period does not" do
     create_transaction(account: @eur, name: "Inside the range", date: 5.days.ago.to_date, currency: @family.currency)
     create_transaction(account: @gbp, name: "Before the range", date: 20.days.ago.to_date, currency: @family.currency)

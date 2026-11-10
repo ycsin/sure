@@ -2,10 +2,8 @@
 
 <% copy = account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile) %>
 <div id="<%= copy %>" data-group-key="<%= account_group.key %>">
-  <%# With manual ordering the rows stay flat, as reordering works on single rows. %>
-  <% entries = sortable ? account_group.accounts : account_group.sidebar_entries(order: Current.user&.account_order, institution_groups: Current.family.institution_group_settings) %>
-  <% active_bundle = entries.any? { |entry| entry.is_a?(BalanceSheet::AccountGroup::InstitutionBundle) && entry.slug == sidebar_active_institution_group_slug } %>
-  <% is_open = open.nil? ? (active_bundle || account_group.accounts.any? { |account| page_active?(account_path(account)) } || Current.user.always_expanded_account_group?(account_group.key)) : open %>
+  <% entries = sidebar_group_entries(account_group, sortable: sortable) %>
+  <% is_open = sidebar_group_open?(account_group, entries, open: open) %>
   <%= render DS::Disclosure.new(align: :left, open: is_open) do |disclosure| %>
     <% disclosure.with_summary_content do %>
       <div class="flex items-center gap-3">

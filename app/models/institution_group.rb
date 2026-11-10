@@ -23,7 +23,19 @@ class InstitutionGroup < ApplicationRecord
   # theirs; without them, any account of the family's.
   attr_accessor :member_accounts
 
+  # The name and domain the bundle takes from its accounts. The form shows
+  # them filled in; saved unchanged, they stay blank, so the bundle keeps
+  # following its accounts.
+  attr_accessor :inherited_name, :inherited_domain
+
+  before_validation :keep_inherited_values_blank
+
   private
+    def keep_inherited_values_blank
+      self.name = nil if name.present? && name == inherited_name
+      self.institution_domain = nil if institution_domain.present? && institution_domain == inherited_domain
+    end
+
     def logo_account_is_a_member
       return if logo_account_id.blank?
 

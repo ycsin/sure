@@ -4,9 +4,12 @@
     <%= render DS::Alert.new(message: institution_group.errors.full_messages.to_sentence, variant: :error) %>
   <% end %>
 
-  <%= form.text_field :name, label: t(".name"), placeholder: t(".name_placeholder"), autofocus: true %>
+  <%# Blank fields follow the accounts, so the form shows what they give. %>
+  <%= form.text_field :name, value: institution_group.name || bundle.inherited_name,
+                      label: t(".name"), placeholder: t(".name_placeholder"), autofocus: true %>
 
-  <%= form.text_field :institution_domain, label: t(".institution_domain"), placeholder: t(".institution_domain_placeholder") %>
+  <%= form.text_field :institution_domain, value: institution_group.institution_domain || bundle.inherited_domain,
+                      label: t(".institution_domain"), placeholder: t(".institution_domain_placeholder") %>
 
   <%= form.select :logo_account_id,
                   [ [ t(".icon_from_url"), "" ] ] + bundle.accounts.map { |account| [ account.name, account.id ] },
