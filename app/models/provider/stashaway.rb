@@ -187,6 +187,12 @@ class Provider::Stashaway
     unless performance.is_a?(Hash) && performance["netAssetValueData"].is_a?(Array)
       raise ApiError.new("StashAway goal #{goal_id} answered without its #{currency} performance", status_code: 200)
     end
+    # Figures in another currency would be stored as `currency` ones. An
+    # answer that does not name its currency is taken as asked for.
+    answered = performance["currency"].presence
+    if answered && !answered.to_s.casecmp?(currency.to_s)
+      raise ApiError.new("StashAway goal #{goal_id} answered its performance in #{answered}, not #{currency}", status_code: 200)
+    end
 
     {
       "nav" => Array(performance["netAssetValueData"]),

@@ -32,6 +32,19 @@ class Stashaway::AccountEditorComponent < ApplicationComponent
     StashawayItem.encryption_ready?
   end
 
+  # The opt-in to keep the password, on the sign-in and connect forms alike;
+  # nothing while it cannot be kept.
+  def remember_password_field(form, checked: false)
+    return unless password_can_be_kept?
+
+    tag.div(class: "flex items-center gap-2") do
+      safe_join([
+        form.check_box(:remember_password, class: "checkbox checkbox--light", checked: checked),
+        form.label(:remember_password, translation("remember_password_label"), class: "text-sm text-secondary cursor-pointer select-none")
+      ])
+    end
+  end
+
   def translation(key, **options)
     helpers.t("settings.providers.stashaway_panel.#{key}", **options)
   end

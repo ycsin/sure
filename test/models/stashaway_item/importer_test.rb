@@ -113,6 +113,46 @@ class StashawayItem::ImporterTest < ActiveSupport::TestCase
     assert_equal 2, DebugLogEntry.where("message LIKE ?", "%g1 (General Investing) answered no transactions after it had some%").count
   end
 
+  test "an open portfolio answering with values ending before the stored ones keeps the detail stored for it" do
+    store_general(stored_goal)
+    @provider.stubs(:goals).returns([ general_goal("ACTIVE") ])
+    @provider.stubs(:goal_transactions).with("g1").returns([ stashaway_row("d1", "2026-01-05", "Deposit", 50), stashaway_row("d2", "2026-01-25", "Deposit", 10) ])
+    @provider.stubs(:goal_performance).with("g1", anything).returns({ "nav" => stashaway_daily("2026-01-05", "2026-01-20") { 50 }, "net_deposits" => [] })
+
+    StashawayItem::Importer.new(@item, provider: @provider).import
+
+    record = stashaway_accounts(:general).reload.goals.sole
+    assert_equal [ "stale", [ "gd1" ], 27 ], [ record["unavailable"], record["transactions"].map { |item| item["id"] }, record.dig("performance", "SGD", "nav").size ]
+    assert DebugLogEntry.where("message LIKE ?", "%g1 (General Investing) answered SGD values ending 2026-01-20, before the 2026-01-31 stored%").exists?
+  end
+
+  test "an open portfolio answering with values ending on the stored day replaces the detail stored for it" do
+    store_general(stored_goal)
+    @provider.stubs(:goals).returns([ general_goal("ACTIVE") ])
+    stub_goal("g1", rows: [ stashaway_row("d1", "2026-01-05", "Deposit", 50), stashaway_row("d2", "2026-01-25", "Deposit", 10) ], nav: 60)
+
+    StashawayItem::Importer.new(@item, provider: @provider).import
+
+    record = stashaway_accounts(:general).reload.goals.sole
+    assert_equal [ nil, %w[gd1 gd2], 60 ], [ record["unavailable"], record["transactions"].map { |item| item["id"] }, record.dig("performance", "SGD", "nav").last["amount"] ]
+  end
+
+  test "an open portfolio answering with values starting after the stored ones keeps the stored days before them" do
+    store_general(stored_goal)
+    @provider.stubs(:goals).returns([ general_goal("ACTIVE") ])
+    @provider.stubs(:goal_transactions).with("g1").returns([ stashaway_row("d1", "2026-01-05", "Deposit", 50), stashaway_row("d2", "2026-01-25", "Deposit", 10) ])
+    @provider.stubs(:goal_performance).with("g1", anything).returns({ "nav" => stashaway_daily("2026-01-20", "2026-01-31") { 60 }, "net_deposits" => [] })
+
+    StashawayItem::Importer.new(@item, provider: @provider).import
+
+    record = stashaway_accounts(:general).reload.goals.sole
+    nav = record.dig("performance", "SGD", "nav")
+    assert_equal [ nil, %w[gd1 gd2] ], [ record["unavailable"], record["transactions"].map { |item| item["id"] } ]
+    assert_equal [ 27, "2026-01-05", 50, "2026-01-19", 50, "2026-01-20", 60, 60 ],
+                 [ nav.size, nav.first["date"][0, 10], nav.first["amount"], nav[14]["date"][0, 10], nav[14]["amount"], nav[15]["date"][0, 10], nav[15]["amount"], nav.last["amount"] ]
+    assert DebugLogEntry.where("message LIKE ?", "%g1 (General Investing) answered SGD values starting 2026-01-20, after the 2026-01-05 stored; the 15 stored days before it are kept%").exists?
+  end
+
   test "portfolios named in another script group by that name" do
     @provider.stubs(:goals).returns([
       { "_id" => "a", "displayName" => "退休 储蓄", "goalType" => "CUSTOM", "fundingSource" => "PERSONAL", "state" => "ARCHIVED", "currency" => "SGD" },

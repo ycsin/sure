@@ -129,10 +129,11 @@ class StashawayItem::Importer
 
       if (lost = lost_detail(record, stored[record["id"]]))
         report_portfolio(record, stashaway_account,
-          "StashAway portfolio #{record["id"]} (#{record["name"]}) answered #{lost} after it had some; the detail stored for it last is used")
-        return unavailable_record(record, stored, "empty")
+          "StashAway portfolio #{record["id"]} (#{record["name"]}) answered #{lost.last}; the detail stored for it last is used")
+        return unavailable_record(record, stored, lost.first)
       end
 
+      keep_stored_start(record, stored[record["id"]], stashaway_account)
       record
     rescue Provider::Stashaway::NotFound => e
       report_unavailable(record, e, stashaway_account)
@@ -151,8 +152,66 @@ class StashawayItem::Importer
     # account without it, as a goal with no transactions counts as having
     # nothing to value. One answering without value history but with its
     # transactions is left to the plan, which values the account without it.
+    #
+    # Its value history only grows too, so a series ending before the one
+    # stored is a stale answer: taken as it is, the plan would move the last
+    # valued day back, drop the rows imported since and anchor the balance
+    # on the older value. Returns the reason and what to log, or nil.
     def lost_detail(record, last)
-      "no transactions" if last && record["transactions"].empty? && Array(last["transactions"]).any?
+      return unless last
+
+      if record["transactions"].empty? && Array(last["transactions"]).any?
+        return [ "empty", "no transactions after it had some" ]
+      end
+
+      record["performance"].each do |currency, performance|
+        current_end = nav_end(performance)
+        stored_end = nav_end(last.dig("performance", currency))
+        if current_end && stored_end && current_end < stored_end
+          return [ "stale", "#{currency} values ending #{current_end}, before the #{stored_end} stored" ]
+        end
+      end
+      nil
+    end
+
+    # Nor does its value history lose its start: an answer beginning after
+    # the series stored is missing its older days, which the plan would read
+    # as worth nothing, booking returns that cancel the deposits made then.
+    # The stored days before the answer's first are kept, and the shortfall
+    # logged. Unlike holding the whole stored detail, this cannot stop the
+    # portfolio updating when StashAway's series starts later for good.
+    def keep_stored_start(record, last, stashaway_account)
+      return unless last
+
+      record["performance"].each do |currency, performance|
+        first = nav_dates(performance).min
+        next unless first
+
+        older = nav_points(last.dig("performance", currency)).select { |point| (date = nav_date(point)) && date < first }
+        next if older.empty?
+
+        performance["nav"] = older + performance["nav"]
+        report_portfolio(record, stashaway_account,
+          "StashAway portfolio #{record["id"]} (#{record["name"]}) answered #{currency} values starting #{first}, " \
+          "after the #{older.filter_map { |point| nav_date(point) }.min} stored; the #{older.size} stored days before it are kept")
+      end
+    end
+
+    # The last day of a stored or fetched value series, or nil when it has none.
+    def nav_end(performance)
+      nav_dates(performance).max
+    end
+
+    def nav_dates(performance)
+      nav_points(performance).filter_map { |point| nav_date(point) }
+    end
+
+    def nav_points(performance)
+      performance.is_a?(Hash) ? Array(performance["nav"]) : []
+    end
+
+    def nav_date(point)
+      point["date"].to_s[0, 10].presence if point.is_a?(Hash)
     end
 
     def unavailable_record(record, stored, reason)

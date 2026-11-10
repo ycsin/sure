@@ -277,6 +277,45 @@ class StashawayAccount::EntryPlanTest < ActiveSupport::TestCase
     assert_empty plan.entries
   end
 
+  test "a plan with a portfolio StashAway failed to serve and whose stored rows have no value history in the account currency is not applicable" do
+    valued = stashaway_goal("A", name: "Simple SGD",
+      transactions: [ stashaway_row("d1", "2026-01-05", "Deposit", 500) ],
+      nav: { "SGD" => stashaway_daily("2026-01-05", "2026-01-31") { 500 } })
+
+    %w[error not\ found empty stale].each do |reason|
+      failed = stashaway_goal("B", name: "Income SGD", unavailable: reason,
+        transactions: [ stashaway_row("d2", "2026-01-10", "Deposit", 300) ],
+        nav: { "USD" => stashaway_daily("2026-01-10", "2026-01-31") { 225 } })
+
+      plan = stashaway_plan([ valued, failed ])
+
+      assert_not plan.applicable, reason
+      assert_equal "Income SGD: no SGD value history", plan.reason
+      assert_empty plan.entries
+    end
+  end
+
+  # StashAway never serves such a portfolio again, so waiting for its value
+  # would stop the account for good.
+  test "a closed or unlisted portfolio whose stored rows have no value history in the account currency is left out" do
+    valued = stashaway_goal("A", name: "Simple SGD",
+      transactions: [ stashaway_row("d1", "2026-01-05", "Deposit", 500) ],
+      nav: { "SGD" => stashaway_daily("2026-01-05", "2026-01-31") { 500 } })
+
+    [ [ "CLOSED", "closed" ], [ "ACTIVE", "unlisted" ] ].each do |state, reason|
+      gone = stashaway_goal("B", name: "Income SGD", state: state, unavailable: reason,
+        transactions: [ stashaway_row("d2", "2026-01-10", "Deposit", 300) ],
+        nav: { "USD" => stashaway_daily("2026-01-10", "2026-01-31") { 225 } })
+
+      plan = stashaway_plan([ valued, gone ])
+
+      assert plan.applicable, reason
+      assert_equal [ "tx:d1" ], plan.entries.map(&:external_id)
+      assert_equal 500, plan.expected_balance
+      assert_match(/Income SGD: .*\(#{reason}\) and the detail stored last has no SGD value history/, plan.warnings.sole)
+    end
+  end
+
   test "a portfolio whose value points are all unusable counts as unvalued" do
     valued = stashaway_goal("A", name: "Simple SGD",
       transactions: [ stashaway_row("d1", "2026-01-05", "Deposit", 500) ],

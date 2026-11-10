@@ -111,12 +111,7 @@
                                   autocomplete: "current-password",
                                   required: true %>
 
-          <% if password_can_be_kept? %>
-            <div class="flex items-center gap-2">
-              <%= form.check_box :remember_password, class: "checkbox checkbox--light", checked: item.password_saved? %>
-              <%= form.label :remember_password, translation("remember_password_label"), class: "text-sm text-secondary cursor-pointer select-none" %>
-            </div>
-          <% end %>
+          <%= remember_password_field(form, checked: item.password_saved?) %>
 
           <%= form.submit translation("sign_in") %>
         <% end %>
@@ -165,12 +160,7 @@
                           autocomplete: "current-password",
                           required: true %>
 
-  <% if password_can_be_kept? %>
-    <div class="flex items-center gap-2">
-      <%= form.check_box :remember_password, class: "checkbox checkbox--light" %>
-      <%= form.label :remember_password, translation("remember_password_label"), class: "text-sm text-secondary cursor-pointer select-none" %>
-    </div>
-  <% end %>
+  <%= remember_password_field(form) %>
 
   <%= form.submit translation("connect") %>
 <% end %>

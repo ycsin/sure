@@ -217,6 +217,25 @@ class Provider::StashawayTest < ActiveSupport::TestCase
     end
   end
 
+  test "a performance answer in another currency than asked for is an error" do
+    stub_request(:post, "#{BASE}/graphql/goals").to_return(status: 200, body: { data: { goal: { portfolioPerformance: {
+      lastNavUpdate: "2026-11-03", currency: "SGD",
+      netAssetValueData: [ { date: "2026-11-03T00:00:00.000Z", amount: 10 } ], netDepositsData: []
+    } } } }.to_json, headers: JSON_HEADERS)
+
+    error = assert_raises(Provider::Stashaway::ApiError) { @provider.goal_performance("g1", "USD") }
+    assert_match "in SGD, not USD", error.message
+  end
+
+  test "a performance answer that does not name its currency is taken as asked for" do
+    stub_request(:post, "#{BASE}/graphql/goals").to_return(status: 200, body: { data: { goal: { portfolioPerformance: {
+      lastNavUpdate: "2026-11-03", currency: nil,
+      netAssetValueData: [ { date: "2026-11-03T00:00:00.000Z", amount: 10 } ], netDepositsData: []
+    } } } }.to_json, headers: JSON_HEADERS)
+
+    assert_equal [ { "date" => "2026-11-03T00:00:00.000Z", "amount" => 10 } ], @provider.goal_performance("g1", "USD")["nav"]
+  end
+
   test "an expired token is an authentication error" do
     stub_request(:post, "#{BASE}/graphql/goals").to_return(status: 401, body: "")
 

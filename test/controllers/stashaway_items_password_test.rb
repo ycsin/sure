@@ -77,9 +77,14 @@ class StashawayItemsPasswordTest < ActionDispatch::IntegrationTest
     StashawayItem.stubs(:encryption_ready?).returns(true)
     get connect_form_settings_providers_path(provider_key: "stashaway")
     assert_response :success
+    ids = []
     assert_select "turbo-frame#stashaway-connect-form input[type=checkbox][name='stashaway_login[remember_password]']", 2 do |boxes|
-      assert_equal 2, boxes.map { |box| box["id"] }.uniq.size
+      ids = boxes.map { |box| box["id"] }
+      assert_equal 2, ids.uniq.size
       assert boxes.none? { |box| box["checked"] }
+    end
+    ids.each do |id|
+      assert_select "turbo-frame#stashaway-connect-form label[for=?]", id, text: "Keep my password so Sure can sign in again by itself"
     end
 
     StashawayItem.stubs(:encryption_ready?).returns(false)

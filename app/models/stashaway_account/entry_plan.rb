@@ -160,7 +160,10 @@ class StashawayAccount::EntryPlan
     # measure the first month from, the pre-start history would be booked
     # as a return; without StashAway's value for a portfolio whose rows are
     # planned, the returns rows would cancel those rows and the anchor
-    # would miss that portfolio.
+    # would miss that portfolio. The same goes for one StashAway failed to
+    # serve this time, with no value stored for it in the account currency:
+    # left out, the account would be anchored without it and its rows
+    # removed.
     def not_applicable_reason
       if start && base.nil?
         "the account's balance on #{start.prev_day} is not known yet"
@@ -168,7 +171,7 @@ class StashawayAccount::EntryPlan
         "no #{currency} value history for any portfolio"
       else
         unvalued = goals.select do |goal|
-          open_and_available?(goal) && Array(goal["transactions"]).any? && series_for(goal).nil?
+          served_again?(goal) && Array(goal["transactions"]).any? && series_for(goal).nil?
         end
         "#{unvalued.map { |goal| goal["name"] }.join(", ")}: no #{currency} value history" if unvalued.any?
       end
@@ -307,6 +310,14 @@ class StashawayAccount::EntryPlan
 
     def open_and_available?(goal)
       goal["unavailable"].blank? && !closed?(goal)
+    end
+
+    # Whether StashAway serves the portfolio's detail on a later sync: an
+    # open one it still lists, even when it failed to serve it this time. A
+    # closed one, or one it no longer lists, never comes back, so waiting
+    # for its value would stop the account for good; it is left out instead.
+    def served_again?(goal)
+      !closed?(goal) && goal["unavailable"] != "unlisted"
     end
 
     # nil for rows that are not income or flows (or not final yet), :unknown
