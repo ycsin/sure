@@ -47,6 +47,20 @@ class AccountsControllerTest < ActionDispatch::IntegrationTest
     assert_select "head script", text: /sure\.sidebarWidth\.".*--" \+ side\[0\] \+ "-sidebar-width"/m
   end
 
+  test "the sidebar shows an institution's entry with its saved name and currency" do
+    family = @user.family
+    ExchangeRate.create!(from_currency: family.currency, to_currency: "CHF", date: Date.current, rate: 2)
+    2.times { |index| family.accounts.create!(name: "Wise #{index}", balance: 10, currency: family.currency, institution_name: "Wise", accountable: Depository.new) }
+    family.institution_groups.create!(key: "wise", name: "My Wise", currency: "CHF")
+
+    get root_url
+
+    assert_select "details[data-institution-bundle='wise'] summary", minimum: 1 do
+      assert_select "p", text: "My Wise"
+      assert_select "p.privacy-sensitive", text: Money.new(40, "CHF").format
+    end
+  end
+
   test "show points an unmatched transaction with a counterpart to the transfer matcher" do
     outflow = create_transaction(account: @account, name: "Hint outflow", amount: 500, date: Date.current)
     create_transaction(account: accounts(:credit_card), name: "Hint inflow", amount: -500, date: Date.current)

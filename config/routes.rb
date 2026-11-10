@@ -820,6 +820,8 @@ Rails.application.routes.draw do
     resource :sharing, only: [ :show, :update ], controller: "account_sharings"
   end
 
+  resources :institution_groups, only: %i[show edit update], param: :slug
+
   resources :account_statements, only: %i[index show create update destroy] do
     member do
       patch :link

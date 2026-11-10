@@ -1,0 +1,9 @@
+---
+en:
+  activerecord:
+    attributes:
+      institution_group:
+        currency: Display currency
+        institution_domain: Institution URL
+        logo_account: Icon
+        name: Name

@@ -80,6 +80,18 @@ class AccountsHelperTest < ActionView::TestCase
     assert_not_equal before, sidebar_key
   end
 
+  test "sidebar cache key changes when an institution's bundle settings are saved" do
+    before = sidebar_key
+    settings = @family.institution_groups.create!(key: "chase")
+    created = sidebar_key
+    assert_not_equal before, created
+
+    travel 1.second do
+      settings.update!(currency: "EUR")
+    end
+    assert_not_equal created, sidebar_key
+  end
+
   private
     def sidebar_key
       account_sidebar_tabs_cache_key(family: @user.family, active_tab: "all", mobile: false)

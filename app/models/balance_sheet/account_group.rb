@@ -8,25 +8,73 @@ class BalanceSheet::AccountGroup
   # Several accounts of the group held at one institution (the currency
   # balances of a Wise account, say), shown in the sidebar as one entry with
   # their combined total: in their own currency when they all share one, else
-  # in the family's.
-  InstitutionBundle = Data.define(:key, :name, :accounts, :total, :currency, :converted_total) do
+  # in the family's, unless the institution's settings (an InstitutionGroup)
+  # choose a currency, a name or an icon.
+  InstitutionBundle = Data.define(:key, :group_key, :name, :accounts, :total, :currency, :converted_total, :settings) do
     include Monetizable
 
     monetize :total, as: :total_money
 
-    # The account whose icon stands for the institution: one with a logo of
-    # its own, else the first.
+    # Names the bundle in URLs and DOM ids: the key itself can hold any
+    # character, and an institution can have a bundle in more than one group.
+    def slug
+      "#{group_key}-#{Digest::MD5.hexdigest(key)[0, 12]}"
+    end
+
+    def to_param
+      slug
+    end
+
+    # The account whose icon stands for the institution: the one picked in
+    # its settings, else one with a logo of its own, else the first.
     def logo_account
-      accounts.find { |account| account.logo.attached? } || accounts.first
+      chosen_logo_account || accounts.find { |account| account.logo.attached? } || accounts.first
+    end
+
+    # With a domain set and no account picked, the icon is the domain's: the
+    # logo stored on an account at that domain, as that account shows it, or
+    # else Brandfetch's icon for the domain, the two places an account's icon
+    # for a domain comes from.
+    def logo_url
+      return logo_account.logo_url if chosen_logo_account || domain.blank?
+
+      accounts.find { |account| account.institution_domain == domain && account.logo.attached? }&.logo_url ||
+        Account.brandfetch_logo_url_for(domain) ||
+        logo_account.logo_url
+    end
+
+    def domain
+      settings&.institution_domain
     end
 
     def syncing?
       accounts.any?(&:syncing?)
     end
 
+    # The accounts' combined balance history in the bundle's currency, over
+    # the accounts its total counts.
+    def balance_series(period:)
+      Balance::ChartSeriesBuilder.new(
+        account_ids: BalanceSheet::ClassificationGroup.counted_accounts(accounts).map(&:id),
+        currency: currency,
+        period: period,
+        favorable_direction: accounts.first.favorable_direction
+      ).balance_series
+    end
+
+    # When the earliest of the accounts' histories starts, or nil.
+    def history_start_date
+      accounts.filter_map(&:history_start_date).min
+    end
+
     def dom_id(prefix)
       "#{prefix}_institution_#{Digest::MD5.hexdigest(key)[0, 12]}"
     end
+
+    private
+      def chosen_logo_account
+        accounts.find { |account| account.id == settings.logo_account_id } if settings&.logo_account_id
+      end
   end
 
   def initialize(name:, color:, accountable_type:, accounts:, classification_group:)
@@ -79,8 +127,9 @@ class BalanceSheet::AccountGroup
   # a bundle by its institution's name or its total (balances compared in the
   # family's currency); otherwise a bundle takes its first account's place.
   # A bundle's accounts keep the group's order.
-  def sidebar_entries(order: nil)
-    entries = sidebar_rows
+  # `institution_groups` holds the family's saved bundle settings by key.
+  def sidebar_entries(order: nil, institution_groups: {})
+    entries = sidebar_rows(institution_groups)
     case order&.key
     when "name_asc", "name_desc"
       sorted = entries.each_with_index.sort_by { |entry, index| [ entry_name(entry).downcase, index ] }.map(&:first)
@@ -93,7 +142,11 @@ class BalanceSheet::AccountGroup
     end
   end
 
-  private def sidebar_rows
+  def institution_bundles(institution_groups: {})
+    sidebar_rows(institution_groups).grep(InstitutionBundle)
+  end
+
+  private def sidebar_rows(institution_groups)
     by_institution = accounts.group_by { |account| institution_key(account) }
     bundled = Set.new
 
@@ -104,17 +157,35 @@ class BalanceSheet::AccountGroup
       next if bundled.include?(key)
 
       bundled << key
-      counted = BalanceSheet::ClassificationGroup.counted_accounts(members)
-      shared_currency = members.map(&:currency).uniq.one? ? members.first.currency : nil
-      InstitutionBundle.new(
-        key: key,
-        name: account.institution_name.presence || account.institution_domain,
-        accounts: members,
-        total: shared_currency ? counted.sum(&:balance) : counted.sum(&:converted_balance),
-        currency: shared_currency || currency,
-        converted_total: counted.sum(&:converted_balance)
-      )
+      institution_bundle(key, account, members, institution_groups[key])
     end
+  end
+
+  private def institution_bundle(key, first_account, members, settings)
+    counted = BalanceSheet::ClassificationGroup.counted_accounts(members)
+    shared_currency = members.map(&:currency).uniq.one? ? members.first.currency : nil
+    display_currency = settings&.currency || shared_currency || currency
+
+    InstitutionBundle.new(
+      key: key,
+      group_key: self.key,
+      name: settings&.name || first_account.institution_name.presence || first_account.institution_domain,
+      accounts: members,
+      total: total_in(counted, display_currency),
+      currency: display_currency,
+      converted_total: counted.sum(&:converted_balance),
+      settings: settings
+    )
+  end
+
+  # The accounts' balances summed in `target`: each account's own balance in
+  # that currency, the balance sheet's conversion in the family's, and today's
+  # rates (fetched together) in any other.
+  private def total_in(counted, target)
+    return counted.sum(&:converted_balance) if target == currency
+
+    rates = ExchangeRate.rates_for(counted.map(&:currency) - [ target ], to: target)
+    counted.sum { |account| account.currency == target ? account.balance : account.balance * rates.fetch(account.currency) }
   end
 
   # "asset" or "liability"

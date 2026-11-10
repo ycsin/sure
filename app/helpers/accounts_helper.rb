@@ -37,6 +37,12 @@ module AccountsHelper
     match && match[1]
   end
 
+  # The same for an institution bundle's page, `/institution_groups/<slug>`.
+  def sidebar_active_institution_group_slug
+    match = request.path.match(%r{\A/institution_groups/([\w-]+)})
+    match && match[1]
+  end
+
   # Cache key for `accounts/_account_sidebar_tabs.html.erb`.
   # Kept here (not in the ERB) so the partial stays render-only.
   #
@@ -94,17 +100,23 @@ module AccountsHelper
     providers_version = AccountProvider.where(account_id: family.accounts.select(:id))
       .pick(Arel.sql("count(*)"), Arel.sql("max(account_providers.updated_at)"))
 
+    # The name, icon and currency saved for an institution's bundle.
+    institution_groups_version = family.institution_groups
+      .pick(Arel.sql("count(*)"), Arel.sql("max(institution_groups.updated_at)"))
+
     [
-      family.build_cache_key("account_sidebar_tabs_v10", invalidate_on_data_updates: true),
+      family.build_cache_key("account_sidebar_tabs_v11", invalidate_on_data_updates: true),
       Current.user&.id,
       shares_version,
       providers_version,
+      institution_groups_version,
       active_tab,
       mobile,
       I18n.locale,
       # Sparkline URLs carry a version that rolls over with the 30-day window.
       Date.current,
       sidebar_active_account_id,
+      sidebar_active_institution_group_slug,
       # Fold the per-user "start expanded by default" preference into the key
       # so toggling it in Settings busts the 12h fragment cache immediately
       # (this partial renders with skip_digest: true, so the template digest

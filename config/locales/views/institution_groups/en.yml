@@ -1,0 +1,33 @@
+---
+en:
+  institution_groups:
+    accounts:
+      title: Accounts
+    activity:
+      clear_range: Show all activity
+      entries: entries
+      entry: entry
+      entry_column: Activity
+      no_entries: No activity in these accounts yet.
+      no_entries_in_range: No activity in these accounts in this period.
+      title: Activity
+    chart:
+      title: Combined balance
+    edit:
+      title: "%{name} settings"
+    form:
+      currency: Display currency
+      currency_default: Default (the accounts' shared currency, else the family's)
+      currency_hint: The currency the total and the chart are shown in.
+      icon: Icon
+      icon_from_url: Icon from URL
+      icon_hint: Icon from URL shows the logo of the institution's URL when one can be found, else the usual icon.
+      institution_domain: URL
+      institution_domain_placeholder: wise.com
+      name: Name
+      name_placeholder: The institution's name
+      save: Save
+    header:
+      settings: Settings
+    update:
+      success: Settings saved

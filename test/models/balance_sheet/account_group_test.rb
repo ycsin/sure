@@ -77,4 +77,72 @@ class BalanceSheet::AccountGroupTest < ActiveSupport::TestCase
 
     assert_equal [ %w[A B], %w[C D] ], bundles.map { |bundle| bundle.accounts.map(&:name).sort }.sort
   end
+
+  test "saved settings rename a bundle and show its total in their currency, converted at today's rates" do
+    ExchangeRate.create!(from_currency: "EUR", to_currency: "CHF", date: Date.current, rate: 0.8)
+    ExchangeRate.create!(from_currency: @family.currency, to_currency: "CHF", date: Date.current, rate: 0.5)
+    create_account("Wise EUR", balance: 100, currency: "EUR", institution: "Wise")
+    create_account("Wise main", balance: 50, institution: "Wise")
+    settings = @family.institution_groups.create!(key: "wise", name: "Wise multi-currency", currency: "CHF")
+
+    bundle = cash_group.sidebar_entries(institution_groups: { "wise" => settings }).grep(BalanceSheet::AccountGroup::InstitutionBundle).sole
+
+    assert_equal "Wise multi-currency", bundle.name
+    assert_equal Money.new(105, "CHF"), bundle.total_money
+  end
+
+  test "a saved currency in the family's converts accounts sharing another currency" do
+    ExchangeRate.create!(from_currency: "SGD", to_currency: @family.currency, date: Date.current, rate: 3)
+    create_account("DBS savings", balance: 100, currency: "SGD", institution: "DBS")
+    create_account("DBS salary", balance: 20, currency: "SGD", institution: "DBS")
+    settings = @family.institution_groups.create!(key: "dbs", currency: @family.currency)
+
+    bundle = cash_group.institution_bundles(institution_groups: { "dbs" => settings }).sole
+
+    assert_equal Money.new(360, @family.currency), bundle.total_money
+    assert_equal "DBS", bundle.name
+  end
+
+  test "the icon is the picked member's, else the default; an account outside the bundle is ignored" do
+    first = create_account("Wise A", balance: 1, institution: "Wise")
+    second = create_account("Wise B", balance: 1, institution: "Wise")
+    outsider = create_account("Savings", balance: 1)
+    picked = @family.institution_groups.create!(key: "wise", logo_account: second)
+
+    bundle = cash_group.institution_bundles(institution_groups: { "wise" => picked }).sole
+    assert_equal second, bundle.logo_account.account
+
+    picked.logo_account_id = outsider.id
+    bundle = cash_group.institution_bundles(institution_groups: { "wise" => picked }).sole
+    assert_equal first, bundle.logo_account.account
+  end
+
+  test "with a domain and no picked account the icon is the domain's" do
+    Setting.stubs(:brand_fetch_client_id).returns("client-id")
+    create_account("Wise A", balance: 1, institution: "Wise")
+    at_domain = create_account("Wise B", balance: 1, institution: "Wise", domain: "wise.com")
+    settings = @family.institution_groups.create!(key: "wise", institution_domain: "https://www.revolut.com/")
+
+    bundle = cash_group.institution_bundles(institution_groups: { "wise" => settings }).sole
+    assert_equal Account.brandfetch_logo_url_for("revolut.com"), bundle.logo_url
+
+    at_domain.logo.attach(io: file_fixture("square-placeholder.png").open, filename: "wise.png")
+    settings.update!(institution_domain: "wise.com")
+    bundle = cash_group.institution_bundles(institution_groups: { "wise" => settings }).sole
+    assert_equal at_domain.reload.stored_logo_url, bundle.logo_url
+  end
+
+  test "an institution's slug names its bundle within one group" do
+    create_account("Wise A", balance: 1, institution: "Wise")
+    create_account("Wise B", balance: 1, institution: "Wise")
+    create_account("Wise card", balance: 1, institution: "Wise", accountable: CreditCard.new)
+    create_account("Wise card 2", balance: 1, institution: "Wise", accountable: CreditCard.new)
+
+    balance_sheet = BalanceSheet.new(@family)
+    cash, card = balance_sheet.account_groups.flat_map(&:institution_bundles)
+
+    assert_not_equal cash.slug, card.slug
+    assert_equal %w[Wise\ card Wise\ card\ 2], balance_sheet.institution_bundle(card.slug).accounts.map(&:name).sort
+    assert_nil balance_sheet.institution_bundle("depository-000000000000")
+  end
 end
