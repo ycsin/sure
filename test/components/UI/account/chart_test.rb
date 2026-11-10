@@ -399,6 +399,19 @@ class UI::Account::ChartTest < ViewComponent::TestCase
     end
   end
 
+  test "period links keep array activity filters from the permitted params" do
+    range = Period.custom(start_date: Date.new(2026, 1, 5), end_date: Date.new(2026, 2, 10))
+    filters = ActionController::Parameters.new(start_date: "2026-01-05", end_date: "2026-02-10", categories: %w[Food Rent])
+      .permit(:start_date, :end_date, categories: [])
+
+    links = period_links(range, filters)
+
+    links[:presets].each do |q|
+      assert_equal({ "categories" => %w[Food Rent] }, q)
+    end
+    assert_equal %w[Food Rent], links[:custom]["categories"]
+  end
+
   test "preset links keep activity dates while a preset is shown" do
     links = period_links(Period.last_30_days, "start_date" => 30.days.ago.to_date.iso8601, "end_date" => Date.current.iso8601)
 
