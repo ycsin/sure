@@ -4,15 +4,17 @@
   <% is_open = open.nil? ? (account_group.accounts.any? { |account| page_active?(account_path(account)) } || Current.user.always_expanded_account_group?(account_group.key)) : open %>
   <%= render DS::Disclosure.new(align: :left, open: is_open) do |disclosure| %>
     <% disclosure.with_summary_content do %>
-      <div class="flex items-center gap-3">
-        <%= icon "chevron-right", class: "group-open:transform group-open:rotate-90" %>
-        <%= tag.span class: class_names("text-sm text-primary font-medium", "animate-pulse" => account_group.syncing?) do %>
+      <%# The name gives way (truncating) to the total, so a long group name
+          can't push the total out of line at a narrow sidebar width. %>
+      <div class="flex items-center gap-3 min-w-0">
+        <%= icon "chevron-right", class: "shrink-0 group-open:transform group-open:rotate-90" %>
+        <%= tag.span class: class_names("text-sm text-primary font-medium truncate", "animate-pulse" => account_group.syncing?), title: account_group.name do %>
           <%= account_group.name %>
         <% end %>
       </div>
 
-      <div class="ml-auto text-right grow">
-        <%= tag.p format_money(account_group.total_money), class: "text-sm font-medium text-primary privacy-sensitive" %>
+      <div class="ml-auto text-right shrink-0">
+        <%= tag.p format_money(account_group.total_money), class: "text-sm font-medium text-primary whitespace-nowrap privacy-sensitive" %>
         <%= turbo_frame_tag "#{account_group.key}_sparkline",
                             src: accountable_sparkline_path(account_group.key, v: sidebar_sparkline_versions(Current.family)[account_group.accountable_type]),
                             loading: "lazy",
