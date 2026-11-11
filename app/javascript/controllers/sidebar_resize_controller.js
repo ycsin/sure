@@ -4,6 +4,7 @@ import {
   SIDEBAR_DEFAULTS,
   clampSidebarWidth,
 } from "utils/sidebar_resize";
+import { holdLayoutAnimating } from "utils/layout_animating";
 
 // Drives the draggable dividers on the left (accounts) and right (assistant)
 // sidebars. The chosen width is stored as a CSS variable on the root layout
@@ -33,6 +34,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.#drag?.release();
     this.#teardownListeners();
   }
 
@@ -64,10 +66,12 @@ export default class extends Controller {
 
   #startResize(event, side) {
     const sidebar = this.#sidebar(side);
-    if (!sidebar) return;
+    // One drag at a time: a second one would orphan the first's hold on
+    // utils/layout_animating and leave the page marked.
+    if (!sidebar || this.#drag) return;
 
     event.preventDefault();
-    this.#drag = { side, sidebar };
+    this.#drag = { side, sidebar, release: holdLayoutAnimating() };
 
     // Suppress the open/close transition so the panel tracks the pointer 1:1.
     sidebar.style.transition = "none";
@@ -78,6 +82,8 @@ export default class extends Controller {
     this.#onUp = () => this.#endResize();
     window.addEventListener("pointermove", this.#onMove);
     window.addEventListener("pointerup", this.#onUp, { once: true });
+    // The browser can take a touch over (scrolling) and cancel the pointer.
+    window.addEventListener("pointercancel", this.#onUp, { once: true });
   }
 
   #resize(event) {
@@ -95,7 +101,8 @@ export default class extends Controller {
   #endResize() {
     if (!this.#drag) return;
 
-    const { side, sidebar } = this.#drag;
+    const { side, sidebar, release } = this.#drag;
+    release();
     sidebar.style.transition = "";
     document.body.style.userSelect = "";
     document.body.style.cursor = "";
@@ -191,7 +198,10 @@ export default class extends Controller {
 
   #teardownListeners() {
     if (this.#onMove) window.removeEventListener("pointermove", this.#onMove);
-    if (this.#onUp) window.removeEventListener("pointerup", this.#onUp);
+    if (this.#onUp) {
+      window.removeEventListener("pointerup", this.#onUp);
+      window.removeEventListener("pointercancel", this.#onUp);
+    }
     this.#onMove = null;
     this.#onUp = null;
   }
