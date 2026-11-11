@@ -1,6 +1,7 @@
 import { Controller } from "@hotwired/stimulus";
 import * as d3 from "d3";
 import { CHART_TOOLTIP_CLASSES } from "utils/chart_tooltip";
+import SettledResize from "utils/settled_resize";
 
 // Grouped bar chart used by the dashboard "money flow" widget — each month
 // shows an expense bar (red) and an income bar (green) side by side.
@@ -19,24 +20,25 @@ export default class extends Controller {
     expenseLabel: { type: String, default: "Expenses" },
   };
 
-  _resizeObserver = null;
+  _settledResize = null;
 
   connect() {
     this._install();
     document.addEventListener("turbo:load", this._reinstall);
-    this._resizeObserver = new ResizeObserver(() => this._reinstall());
-    this._resizeObserver.observe(this.element);
+    this._settledResize = new SettledResize(this.element, this._reinstall);
+    this._settledResize.start();
   }
 
   disconnect() {
     this._teardown();
     document.removeEventListener("turbo:load", this._reinstall);
-    this._resizeObserver?.disconnect();
+    this._settledResize?.stop();
   }
 
   _reinstall = () => {
     this._teardown();
     this._install();
+    this._settledResize?.drew();
   };
 
   _teardown() {

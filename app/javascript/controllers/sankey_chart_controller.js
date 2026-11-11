@@ -10,6 +10,7 @@ import {
   buildCategoryTransactionsUrl,
   isNavigableCategoryNode,
 } from "utils/transactions_filter_url";
+import SettledResize from "utils/settled_resize";
 
 // Connects to data-controller="sankey-chart"
 export default class extends Controller {
@@ -47,12 +48,12 @@ export default class extends Controller {
   connect() {
     this.connected = true;
     this.zoomRootId = null;
-    this.resizeObserver = new ResizeObserver(() => this.#draw());
-    this.resizeObserver.observe(this.#chartElement());
+    this.settledResize = new SettledResize(this.#chartElement(), () => this.#draw());
     this.tooltip = null;
     this.#createTooltip();
     this.#syncZoomControls();
     this.#draw();
+    this.settledResize.start();
 
     // A Turbo morph refresh (the sync toast's auto-refresh) keeps this
     // element and its controller but puts the server markup back around
@@ -81,7 +82,7 @@ export default class extends Controller {
   disconnect() {
     this.connected = false;
     document.removeEventListener("turbo:morph", this.onMorph);
-    this.resizeObserver?.disconnect();
+    this.settledResize?.stop();
     clearTimeout(this.drawTimeout);
     this.tooltip?.remove();
     this.tooltip = null;
@@ -136,6 +137,7 @@ export default class extends Controller {
       chart.selectAll("svg").remove();
       this.#render(nodes, links, width, false);
     }
+    this.settledResize?.drew();
   }
 
   #render(nodes, links, width, animate) {
