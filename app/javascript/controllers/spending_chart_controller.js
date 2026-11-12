@@ -10,6 +10,12 @@ import { CHART_TOOLTIP_CLASSES } from "utils/chart_tooltip";
 // tooltip positioning).
 const CURRENT_COLOR = "var(--color-success)";
 const PREVIOUS_COLOR = "var(--color-gray-400)";
+// The axis labels sit AXIS_PADDING right of the plot, in a column at least
+// AXIS_MIN_WIDTH wide (room for "$1.5K"), widened to fit longer labels
+// ("SGD 12.5K", "CHF 1.5K") with AXIS_GAP to spare at the card's edge.
+const AXIS_PADDING = 8;
+const AXIS_GAP = 4;
+const AXIS_MIN_WIDTH = 48;
 
 export default class extends Controller {
   static values = {
@@ -57,11 +63,8 @@ export default class extends Controller {
     if (width < 50 || height < 50) return;
     if (current.length === 0 && previous.length === 0) return;
 
-    // Room on the right for the axis labels ($0, $1.5K, …), like the
-    // reference design; the curves run to the axis, not the card edge.
-    const margin = { top: 8, right: 48, bottom: 20, left: 4 };
-    const innerWidth = width - margin.left - margin.right;
-    const innerHeight = height - margin.top - margin.bottom;
+    const maxValue = d3.max([...current, ...previous], (d) => d.value) || 0;
+    if (maxValue <= 0) return;
 
     const svg = d3
       .select(this.element)
@@ -70,21 +73,37 @@ export default class extends Controller {
       .attr("height", height)
       .attr("viewBox", [0, 0, width, height]);
 
-    const group = svg
-      .append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    const maxValue = d3.max([...current, ...previous], (d) => d.value) || 0;
-    if (maxValue <= 0) return;
-
-    const x = d3.scaleLinear().domain([1, days]).range([0, innerWidth]);
+    const margin = { top: 8, right: AXIS_MIN_WIDTH, bottom: 20, left: 4 };
+    const innerHeight = height - margin.top - margin.bottom;
     const y = d3
       .scaleLinear()
       .domain([0, maxValue * 1.05])
       .nice()
       .range([innerHeight, 0]);
+    const ticks = y.ticks(4);
 
-    this._drawGridlines(group, y, innerWidth, innerHeight);
+    const group = svg
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Room on the right for the axis labels ($0, $1.5K, …), like the
+    // reference design; the curves run to the axis, not the card edge. The
+    // column fits the widest label, measured as drawn: a fixed one cut longer
+    // labels off at the card's edge.
+    const axis = this._drawYAxis(group, y, ticks);
+    const labelWidth =
+      d3.max(axis.selectAll("text").nodes(), (node) => node.getBBox().width) ||
+      0;
+    margin.right = Math.min(
+      Math.max(AXIS_MIN_WIDTH, Math.ceil(labelWidth) + AXIS_PADDING + AXIS_GAP),
+      width / 3,
+    );
+    const innerWidth = width - margin.left - margin.right;
+    axis.attr("transform", `translate(${innerWidth},0)`);
+
+    const x = d3.scaleLinear().domain([1, days]).range([0, innerWidth]);
+
+    this._drawGridlines(group, y, ticks, innerWidth);
     this._drawXAxis(group, x, days, innerHeight, axisLabels, currentDays);
 
     const line = d3
@@ -138,11 +157,10 @@ export default class extends Controller {
     );
   }
 
-  _drawGridlines(group, y, innerWidth, innerHeight) {
-    const ticks = y.ticks(4);
-
+  _drawGridlines(group, y, ticks, innerWidth) {
+    // Beneath the axis, drawn first to be measured.
     group
-      .append("g")
+      .insert("g", ":first-child")
       .selectAll("line")
       .data(ticks)
       .join("line")
@@ -153,23 +171,28 @@ export default class extends Controller {
       .attr("stroke", "var(--color-gray-300)")
       .attr("stroke-dasharray", "4, 4")
       .attr("stroke-opacity", 0.6);
+  }
 
-    group
+  // The labels' axis, at the plot's left edge until the column is known.
+  _drawYAxis(group, y, ticks) {
+    return group
       .append("g")
-      .attr("transform", `translate(${innerWidth},0)`)
       .call(
         d3
           .axisRight(y)
           .tickValues(ticks)
           .tickSize(0)
-          .tickPadding(8)
+          .tickPadding(AXIS_PADDING)
           .tickFormat((d) => this._formatCompact(d)),
       )
       .call((g) => g.select(".domain").remove())
-      .selectAll("text")
-      .attr("class", "text-secondary fill-current")
-      .style("font-size", "12px")
-      .style("font-weight", "500");
+      .call((g) =>
+        g
+          .selectAll("text")
+          .attr("class", "text-secondary fill-current")
+          .style("font-size", "12px")
+          .style("font-weight", "500"),
+      );
   }
 
   _drawXAxis(group, x, days, innerHeight, axisLabels, currentDays = days) {
