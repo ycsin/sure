@@ -227,6 +227,7 @@ class Settings::ProvidersController < ApplicationController
       { key: "snaptrade",      title: "SnapTrade",       turbo_id: "snaptrade",      partial: "snaptrade_panel", auto_open: "manage" },
       { key: "ibkr",           title: "Interactive Brokers", turbo_id: "ibkr",      partial: "ibkr_panel" },
       { key: "trading212",     title: "Trading 212",     turbo_id: "trading212", partial: "trading212_panel" },
+      { key: "stashaway",      title: "StashAway",       turbo_id: "stashaway",      partial: "stashaway_panel" },
       { key: "moomoo",         title: "moomoo",          turbo_id: "moomoo",         partial: "moomoo_panel" },
       { key: "etoro",          title: "eToro",           turbo_id: "etoro",          partial: "etoro_panel" },
       { key: "trade_republic", title: "Trade Republic",  turbo_id: "trade-republic", partial: "trade_republic_panel" },
@@ -262,6 +263,7 @@ class Settings::ProvidersController < ApplicationController
       "snaptrade"      => "SnaptradeItem",
       "questrade"      => "QuestradeItem",
       "sharesight"     => "SharesightItem",
+      "stashaway"      => "StashawayItem",
       "ibkr"           => "IbkrItem",
       "moomoo"         => "MoomooItem",
       "trading212"     => "Trading212Item",
@@ -311,6 +313,8 @@ class Settings::ProvidersController < ApplicationController
         @onchain_wallet_items = Current.family.onchain_wallet_items.active.ordered
       when "snaptrade"
         @snaptrade_items = Current.family.snaptrade_items.includes(:snaptrade_accounts).ordered
+      when "stashaway"
+        @stashaway_items = Current.family.stashaway_items.active.ordered
       when "ibkr"
         @ibkr_items = Current.family.ibkr_items.ordered
       when "moomoo"
@@ -353,6 +357,7 @@ class Settings::ProvidersController < ApplicationController
       @truelayer_items = Current.family.truelayer_items.active.ordered
       # Providers page only needs to know whether any Sophtron connections exist with valid credentials
       @sophtron_items = Current.family.sophtron_items.where.not(user_id: [ nil, "" ], access_key: [ nil, "" ]).ordered.select(:id)
+      @stashaway_items = Current.family.stashaway_items.active.ordered
       @coinstats_items = Current.family.coinstats_items.ordered # CoinStats panel needs account info for status display
       @wise_items = Current.family.wise_items.active.ordered
       @mercury_items = Current.family.mercury_items.active.ordered
@@ -412,6 +417,7 @@ class Settings::ProvidersController < ApplicationController
         "wise"           => @wise_items,
         "mercury"        => @mercury_items,
         "brex"           => @brex_items,
+        "stashaway"      => @stashaway_items,
         "coinbase"       => @coinbase_items,
         "binance"        => @binance_items,
         "kraken"         => @kraken_items,
