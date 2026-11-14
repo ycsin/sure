@@ -1,6 +1,7 @@
 <%# locals: (account_group:, mobile: false, all_tab: false, open: nil, sortable: false, reconciliation_indicators: {}, **args) %>
 
-<div id="<%= account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile) %>" data-group-key="<%= account_group.key %>">
+<% copy = account_group.dom_id(tab: all_tab ? :all : nil, mobile: mobile) %>
+<div id="<%= copy %>" data-group-key="<%= account_group.key %>">
   <% entries = sidebar_group_entries(account_group, sortable: sortable) %>
   <% is_open = sidebar_group_open?(account_group, entries, open: open) %>
   <%= render DS::Disclosure.new(align: :left, open: is_open) do |disclosure| %>
@@ -24,13 +25,16 @@
 
         <div class="ml-auto text-right shrink-0">
           <%= tag.p format_money(account_group.total_money), class: "text-sm font-medium text-primary whitespace-nowrap privacy-sensitive" %>
-          <%= turbo_frame_tag "#{account_group.key}_sparkline",
-                              src: accountable_sparkline_path(account_group.key, v: sidebar_sparkline_versions(Current.family)[account_group.accountable_type]),
-                              loading: "lazy",
-                              data: sparkline_frame_data do %>
-            <div class="flex items-center w-8 h-4 ml-auto">
-              <div class="w-6 h-px bg-loader"></div>
-            </div>
+          <% group_version = sidebar_sparkline_versions(Current.family)[account_group.accountable_type] %>
+          <%= tag.div id: sidebar_sparkline_wrapper_id(copy, "total", group_version), data: kept_element_data do %>
+            <%= turbo_frame_tag "#{account_group.key}_sparkline",
+                                src: accountable_sparkline_path(account_group.key, v: group_version),
+                                loading: "lazy",
+                                data: sparkline_frame_data do %>
+              <div class="flex items-center w-8 h-4 ml-auto">
+                <div class="w-6 h-px bg-loader"></div>
+              </div>
+            <% end %>
           <% end %>
         </div>
       </div>
@@ -50,7 +54,7 @@
         <% if entry.is_a?(BalanceSheet::AccountGroup::InstitutionBundle) %>
           <%= render "accounts/sidebar_institution_bundle", bundle: entry, account_group: account_group, mobile: mobile, all_tab: all_tab, reconciliation_indicators: reconciliation_indicators %>
         <% else %>
-          <%= render "accounts/sidebar_account_row", account: entry, account_group: account_group, sortable: sortable, reconciliation_indicator: reconciliation_indicators[entry.id] %>
+          <%= render "accounts/sidebar_account_row", account: entry, account_group: account_group, copy: copy, sortable: sortable, reconciliation_indicator: reconciliation_indicators[entry.id] %>
         <% end %>
       <% end %>
     <% end %>

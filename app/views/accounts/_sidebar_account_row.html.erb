@@ -1,4 +1,4 @@
-<%# locals: (account:, account_group:, sortable: false, reconciliation_indicator: nil, show_logo: true) %>
+<%# locals: (account:, account_group:, copy:, sortable: false, reconciliation_indicator: nil, show_logo: true) %>
 <%# Rows become draggable only in sort mode (account-sort-mode). %>
 <%= tag.div class: "flex items-center gap-1 rounded-lg",
       data: sortable ? {
@@ -30,7 +30,9 @@
           data: page_active?(account_path(account)) ? { active_account: true } : {},
           title: account.name do %>
   <% if show_logo %>
-    <%= render "accounts/logo", account: account, size: "sm", color: account_group.color, reconciliation_indicator: reconciliation_indicator %>
+    <%= tag.span id: sidebar_logo_wrapper_id(copy, account, account_group.color, reconciliation_indicator), class: "shrink-0", data: kept_element_data do %>
+      <%= render "accounts/logo", account: account, size: "sm", color: account_group.color, reconciliation_indicator: reconciliation_indicator %>
+    <% end %>
   <% end %>
 
   <div class="min-w-0 grow">
@@ -48,13 +50,16 @@
 
   <div class="ml-auto text-right grow h-10">
     <%= tag.p format_money(account.balance_money), class: "text-sm font-medium text-primary whitespace-nowrap privacy-sensitive" %>
-    <%= turbo_frame_tag dom_id(account, :sparkline),
-                        src: sparkline_account_path(account, v: sidebar_sparkline_versions(Current.family)[account.id]),
-                        loading: "lazy",
-                        data: sparkline_frame_data do %>
-      <div class="flex items-center w-8 h-4 ml-auto">
-        <div class="w-6 h-px bg-loader"></div>
-      </div>
+    <% account_version = sidebar_sparkline_versions(Current.family)[account.id] %>
+    <%= tag.div id: sidebar_sparkline_wrapper_id(copy, account.id, account_version), data: kept_element_data do %>
+      <%= turbo_frame_tag dom_id(account, :sparkline),
+                          src: sparkline_account_path(account, v: account_version),
+                          loading: "lazy",
+                          data: sparkline_frame_data do %>
+        <div class="flex items-center w-8 h-4 ml-auto">
+          <div class="w-6 h-px bg-loader"></div>
+        </div>
+      <% end %>
     <% end %>
   </div>
 <% end %>
