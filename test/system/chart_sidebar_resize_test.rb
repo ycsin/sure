@@ -513,6 +513,9 @@ class ChartSidebarResizeTest < ApplicationSystemTestCase
       const done = arguments[0];
       const chart = document.querySelector("#{NET_WORTH}");
       const sidebar = document.querySelector("[data-app-layout-target='leftSidebar']");
+      // local/deployment glue: #4823 has the sidebars transition only their
+      // width; let this one animate its max-width, as main's sidebars do.
+      sidebar.style.transitionProperty = "max-width";
       let ended = null; let drawn = null;
       sidebar.addEventListener("transitionend", (event) => { if (event.propertyName === "max-width") ended ??= performance.now(); });
       new MutationObserver((mutations) => {
