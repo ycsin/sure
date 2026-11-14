@@ -26,6 +26,7 @@ class ProviderConnectionStatus
     { key: "indexa_capital", type: "IndexaCapitalItem", association: :indexa_capital_items, accounts: :indexa_capital_accounts },
     { key: "trading212", type: "Trading212Item", association: :trading212_items, accounts: :trading212_accounts },
     { key: "etoro", type: "EtoroItem", association: :etoro_items, accounts: :etoro_accounts },
+    { key: "moomoo", type: "MoomooItem", association: :moomoo_items, accounts: :linkable_moomoo_account_summaries },
     { key: "trade_republic", type: "TradeRepublicItem", association: :trade_republic_items, accounts: :trade_republic_accounts },
     { key: "questrade", type: "QuestradeItem", association: :questrade_items, accounts: :questrade_accounts },
     { key: "sharesight", type: "SharesightItem", association: :sharesight_items, accounts: :sharesight_accounts },

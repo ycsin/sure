@@ -227,6 +227,7 @@ class Settings::ProvidersController < ApplicationController
       { key: "snaptrade",      title: "SnapTrade",       turbo_id: "snaptrade",      partial: "snaptrade_panel", auto_open: "manage" },
       { key: "ibkr",           title: "Interactive Brokers", turbo_id: "ibkr",      partial: "ibkr_panel" },
       { key: "trading212",     title: "Trading 212",     turbo_id: "trading212", partial: "trading212_panel" },
+      { key: "moomoo",         title: "moomoo",          turbo_id: "moomoo",         partial: "moomoo_panel" },
       { key: "etoro",          title: "eToro",           turbo_id: "etoro",          partial: "etoro_panel" },
       { key: "trade_republic", title: "Trade Republic",  turbo_id: "trade-republic", partial: "trade_republic_panel" },
       { key: "indexa_capital", title: "Indexa Capital",  turbo_id: "indexa_capital", partial: "indexa_capital_panel" },
@@ -262,6 +263,7 @@ class Settings::ProvidersController < ApplicationController
       "questrade"      => "QuestradeItem",
       "sharesight"     => "SharesightItem",
       "ibkr"           => "IbkrItem",
+      "moomoo"         => "MoomooItem",
       "trading212"     => "Trading212Item",
       "etoro"          => "EtoroItem",
       "trade_republic" => "TradeRepublicItem",
@@ -311,6 +313,8 @@ class Settings::ProvidersController < ApplicationController
         @snaptrade_items = Current.family.snaptrade_items.includes(:snaptrade_accounts).ordered
       when "ibkr"
         @ibkr_items = Current.family.ibkr_items.ordered
+      when "moomoo"
+        @moomoo_items = Current.family.moomoo_items.active.ordered
       when "trading212"
         @trading212_items = Current.family.trading212_items.ordered
       when "etoro"
@@ -353,6 +357,7 @@ class Settings::ProvidersController < ApplicationController
       @wise_items = Current.family.wise_items.active.ordered
       @mercury_items = Current.family.mercury_items.active.ordered
       @brex_items = Current.family.brex_items.active.ordered
+      @moomoo_items = Current.family.moomoo_items.active.ordered
       @coinbase_items = Current.family.coinbase_items.ordered # Coinbase panel needs name and sync info for status display
       @snaptrade_items = Current.family.snaptrade_items.ordered
       @ibkr_items = Current.family.ibkr_items.ordered.select(:id)
@@ -412,6 +417,7 @@ class Settings::ProvidersController < ApplicationController
         "kraken"         => @kraken_items,
         "coinspot"       => @coinspot_items,
         "onchain_wallet" => @onchain_wallet_items,
+        "moomoo"         => @moomoo_items,
         "snaptrade"      => @snaptrade_items,
         "questrade"      => @questrade_items,
         "sharesight"     => @sharesight_items,
