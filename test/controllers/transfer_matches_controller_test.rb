@@ -108,6 +108,80 @@ class TransferMatchesControllerTest < ActionDispatch::IntegrationTest
     assert_equal "Transfer created", flash[:notice]
   end
 
+  test "creates the new transaction in the target account's currency at the amount given" do
+    outflow_entry = create_transaction(amount: 100, account: accounts(:depository))
+    eur_account = eur_depository
+
+    assert_difference [ "Transfer.count", "Entry.count" ], 1 do
+      post transaction_transfer_match_path(outflow_entry), params: {
+        transfer_match: { method: "new", target_account_id: eur_account.id, use_target_currency: "1", target_amount: "91.50" }
+      }
+    end
+
+    new_entry = Transfer.order(created_at: :desc).first.inflow_transaction.entry
+    assert_equal eur_account, new_entry.account
+    assert_equal "EUR", new_entry.currency
+    assert_equal(-91.50, new_entry.amount)
+  end
+
+  test "creates the new transaction in the matched transaction's currency when the option is off" do
+    inflow_entry = create_transaction(amount: -100, account: accounts(:depository))
+    eur_account = eur_depository
+
+    post transaction_transfer_match_path(inflow_entry), params: {
+      transfer_match: { method: "new", target_account_id: eur_account.id, use_target_currency: "0", target_amount: "91.50" }
+    }
+
+    new_entry = Transfer.order(created_at: :desc).first.outflow_transaction.entry
+    assert_equal eur_account, new_entry.account
+    assert_equal "USD", new_entry.currency
+    assert_equal 100, new_entry.amount
+  end
+
+  test "refuses a new transaction in the target account's currency without a positive amount" do
+    outflow_entry = create_transaction(amount: 100, account: accounts(:depository))
+    eur_account = eur_depository
+
+    # "0.001" is 0 at EUR's two decimals.
+    [ "", "0", "-5", "abc", "0.001" ].each do |amount|
+      assert_no_difference [ "Transfer.count", "Entry.count" ] do
+        post transaction_transfer_match_path(outflow_entry), params: {
+          transfer_match: { method: "new", target_account_id: eur_account.id, use_target_currency: "1", target_amount: amount }
+        }
+      end
+      assert_redirected_to transactions_url
+      assert_equal "Enter the amount in EUR for the new transaction.", flash[:alert]
+    end
+  end
+
+  test "an account in the same currency ignores the target currency option" do
+    outflow_entry = create_transaction(amount: 100, account: accounts(:depository))
+
+    post transaction_transfer_match_path(outflow_entry), params: {
+      transfer_match: { method: "new", target_account_id: accounts(:investment).id, use_target_currency: "1", target_amount: "5" }
+    }
+
+    new_entry = Transfer.order(created_at: :desc).first.inflow_transaction.entry
+    assert_equal "USD", new_entry.currency
+    assert_equal(-100, new_entry.amount)
+  end
+
+  test "new gives the dialog each account's currency and the transaction's amount and date" do
+    outflow_entry = create_transaction(amount: 100, account: accounts(:depository))
+    eur_account = eur_depository
+
+    get new_transaction_transfer_match_path(outflow_entry)
+
+    assert_response :success
+    assert_select "[data-controller='transfer-match']" do |elements|
+      currencies = JSON.parse(elements.first["data-transfer-match-account-currencies-value"])
+      assert_equal "EUR", currencies[eur_account.id]
+      assert_equal "USD", elements.first["data-transfer-match-entry-currency-value"]
+      assert_equal outflow_entry.date.iso8601, elements.first["data-transfer-match-date-value"]
+    end
+    assert_select "[data-transfer-match-target='currencySection'] input[name='transfer_match[target_amount]']"
+  end
+
   test "new transfer entry is protected from provider sync" do
     outflow_entry = create_transaction(amount: 100, account: accounts(:depository))
 
@@ -180,4 +254,9 @@ class TransferMatchesControllerTest < ActionDispatch::IntegrationTest
       delete transaction_transfer_match_path(outflow)
     end
   end
+
+  private
+    def eur_depository
+      @user.family.accounts.create!(name: "EUR Savings", balance: 0, currency: "EUR", accountable: Depository.new)
+    end
 end
