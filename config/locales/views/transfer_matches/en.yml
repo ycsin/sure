@@ -2,6 +2,7 @@
 en:
   transfer_matches:
     create:
+      invalid_target_amount: Enter the amount in %{currency} for the new transaction.
       success: Transfer created
     new:
       header:
@@ -22,3 +23,7 @@ en:
       matching_transaction: Matching transaction
       target_account: Target account
       no_matching_transactions: We couldn't find any transactions to match from your other accounts. Please select an account and we will create a new inflow transaction for you.
+      rate_hint: 1 %{from} = %{rate} %{to} on the transaction's date. Adjust it to what actually arrived.
+      rate_missing: No exchange rate for that date. Enter the amount that arrived.
+      record_in_target_currency_html: Record it in %{currency}, the account's currency
+      target_amount: Amount in the account's currency
