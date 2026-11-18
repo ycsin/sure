@@ -44,6 +44,7 @@ class Family < ApplicationRecord
 
   has_many :users, dependent: :destroy
   has_many :accounts, dependent: :destroy
+  has_many :institution_groups, dependent: :destroy
   has_many :invitations, dependent: :destroy
 
   has_many :imports, dependent: :destroy
@@ -567,6 +568,12 @@ class Family < ApplicationRecord
     currency = Family.normalize_currency_code(currency) || self.currency
     @balance_sheets ||= {}
     @balance_sheets[[ user&.id, currency ]] ||= BalanceSheet.new(self, user: user, currency: currency)
+  end
+
+  # The institution groups of the sidebar's bundles by key, loaded once for
+  # every bundle the request renders (a bundle forming its group adds it).
+  def institution_group_settings
+    @institution_group_settings ||= institution_groups.with_attached_logo.index_by(&:key)
   end
 
   def income_statement(user: Current.user, accounts: nil, currency: nil)
