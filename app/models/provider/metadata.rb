@@ -23,6 +23,7 @@ class Provider
       indexa_capital: { region: "ES",      kinds: %w[Investment],      maturity: :alpha,  logo_text: "IC", logo_color: "#dc2626", domain: "indexacapital.com" },
       sophtron:       { region: "US",      kinds: %w[Bank Investment], maturity: :alpha,  logo_text: "SO", logo_color: "#0d9488", domain: "sophtron.com" },
       stashaway:      { region: "Asia",    kinds: %w[Investment],      maturity: :alpha,  logo_text: "SA", logo_color: "#2563eb", domain: "stashaway.sg", name: "StashAway" },
+      tricount:       { region: "Global",  kinds: %w[Bank],            maturity: :alpha,  logo_text: "TC", logo_color: "#0ea5e9", domain: "tricount.com", name: "Tricount" },
       trading212:     { region: "EU",      kinds: %w[Investment],      maturity: :alpha,  logo_text: "T2", logo_color: "#0d9488", domain: "trading212.com" },
       moomoo:         { region: "Global",  kinds: %w[Investment],      maturity: :alpha,  logo_text: "MM", logo_color: "#ff6a00", domain: "moomoo.com", name: "moomoo" },
       etoro:          { region: "Global",  kinds: %w[Investment],      maturity: :alpha,  logo_text: "ET", logo_color: "#16a34a", domain: "etoro.com", name: "eToro" },
