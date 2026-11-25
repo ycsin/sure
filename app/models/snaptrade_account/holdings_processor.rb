@@ -67,10 +67,23 @@ class SnaptradeAccount::HoldingsProcessor
       end
     end
 
+    # Positions the broker no longer lists: those in its latest snapshot or,
+    # before it has listed any, those Sure calculated from the account's
+    # trades. With no provider snapshot, Holding::PortfolioSnapshot reads each
+    # security's latest calculated row back as today's holdings and the reverse
+    # walk assumes they include every trade, so one whose closing trade arrived
+    # after the calculation stayed open on every later sync. A zero row gives
+    # the walk a snapshot to start from.
     def vanished_positions
       provider_id = @snaptrade_account.account_provider&.id or return Holding.none
-      scope = account.holdings.where(account_provider_id: provider_id, external_id: nil)
-      scope.where(date: scope.maximum(:date)).where.not(qty: 0).where.not(security_id: @imported.to_a)
+      latest = if account.holdings.where.not(account_provider_id: nil).exists?
+        scope = account.holdings.where(account_provider_id: provider_id, external_id: nil)
+        scope.where(date: scope.maximum(:date))
+      else
+        # Each security's own latest row, as Holding::PortfolioSnapshot reads them
+        account.holdings.where(id: account.holdings.select("DISTINCT ON (security_id) holdings.id").order(:security_id, date: :desc))
+      end
+      latest.where.not(qty: 0).where.not(security_id: @imported.to_a)
     end
 
     def capture_kept_empty_snapshot
