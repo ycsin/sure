@@ -1,8 +1,8 @@
-<%# locals: (family:, classes: nil, currency: nil) %>
+<%# locals: (family:, classes: nil, currency: nil, accounts: nil) %>
 <%# currency: the currency the page's totals are shown in (the dashboard's
     currency picker); the family currency by default. %>
 <% target = currency.presence || family.currency %>
-<% accounts = Current.accessible_accounts || family.accounts %>
+<% accounts ||= Current.accessible_accounts || family.accounts %>
 <% missing = family.currencies_without_exchange_rate(accounts: accounts, to: target) %>
 <% stale = family.stale_exchange_rate_dates(accounts: accounts, to: target) %>
 <% if missing.any? || stale.any? %>
