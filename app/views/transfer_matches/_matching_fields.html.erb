@@ -2,8 +2,17 @@
 
 <% account_items = accounts.map { |account| { value: account.id, label: account.name, object: account } } %>
 
-<% if candidates.any? %>
-  <div data-controller="transfer-match" class="space-y-2">
+<%= tag.div class: "space-y-2",
+      data: {
+        controller: "transfer-match",
+        transfer_match_account_currencies_value: accounts.to_h { |account| [ account.id, account.currency ] }.to_json,
+        transfer_match_currency_precisions_value: accounts.map(&:currency).uniq.to_h { |code| [ code, Money::Currency.new(code).default_precision ] }.to_json,
+        transfer_match_entry_currency_value: entry.currency,
+        transfer_match_entry_amount_value: entry.amount.abs.to_s,
+        transfer_match_date_value: entry.date.iso8601,
+        transfer_match_exchange_rate_url_value: exchange_rate_path
+      } do %>
+  <% if candidates.any? %>
     <p class="text-sm text-secondary">
       <%= t(".select_method") %>
     </p>
@@ -26,33 +35,48 @@
             label: t(".matching_transaction")
           ) %>
     </div>
+  <% else %>
+    <p class="text-sm text-secondary">
+      <%= t(".no_matching_transactions") %>
+    </p>
 
-    <div data-transfer-match-target="newSelect" class="hidden">
-      <%= render DS::Select.new(
-            form: form,
-            method: :target_account_id,
-            items: account_items,
-            selected: account_items.first&.dig(:value),
-            variant: :logo,
-            searchable: true,
-            label: t(".target_account")
-          ) %>
+    <%= form.hidden_field :method, value: "new" %>
+  <% end %>
+
+  <%= tag.div class: class_names("space-y-2", "hidden" => candidates.any?),
+        data: { transfer_match_target: "newSelect", action: "change->transfer-match#targetChanged" } do %>
+    <%= render DS::Select.new(
+          form: form,
+          method: :target_account_id,
+          items: account_items,
+          selected: account_items.first&.dig(:value),
+          variant: :logo,
+          searchable: true,
+          label: t(".target_account")
+        ) %>
+
+    <%# Shown when the chosen account is in another currency than the transaction. %>
+    <div class="hidden space-y-2" data-transfer-match-target="currencySection">
+      <label class="flex items-center gap-2 text-sm text-primary">
+        <%= form.check_box :use_target_currency,
+              { checked: true, data: { transfer_match_target: "useTargetCurrency", action: "change->transfer-match#toggleTargetCurrency" } },
+              "1", "0" %>
+        <span>
+          <%= t(".record_in_target_currency_html", currency: tag.span(data: { transfer_match_target: "currencyCode" })) %>
+        </span>
+      </label>
+
+      <div data-transfer-match-target="targetAmountField">
+        <%= form.number_field :target_amount,
+              label: t(".target_amount"),
+              step: "any",
+              min: 0,
+              inputmode: "decimal",
+              data: { transfer_match_target: "targetAmount" } %>
+        <p class="text-xs text-secondary mt-1" data-transfer-match-target="rateHint"
+           data-rate-text="<%= t(".rate_hint", from: "%{from}", rate: "%{rate}", to: "%{to}") %>"
+           data-missing-text="<%= t(".rate_missing") %>"></p>
+      </div>
     </div>
-  </div>
-<% else %>
-  <p class="text-sm text-secondary">
-    <%= t(".no_matching_transactions") %>
-  </p>
-
-  <%= form.hidden_field :method, value: "new" %>
-
-  <%= render DS::Select.new(
-        form: form,
-        method: :target_account_id,
-        items: account_items,
-        selected: account_items.first&.dig(:value),
-        variant: :logo,
-        searchable: true,
-        label: t(".target_account")
-      ) %>
+  <% end %>
 <% end %>
