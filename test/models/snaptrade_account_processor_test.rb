@@ -1474,6 +1474,54 @@ class SnaptradeAccountProcessorTest < ActiveSupport::TestCase
     assert_equal synced_once, synced_series, "a second sync changes nothing"
   end
 
+  test "an empty list clears a position only Sure's calculation held" do
+    # Shares vest and are sold between two syncs, so SnapTrade never lists them,
+    # and an earlier calculation left them in today's holdings. With no provider
+    # snapshot that row was read back as today's position on every sync.
+    @snaptrade_account.update!(
+      current_balance: 0,
+      cash_balance: 0,
+      last_holdings_sync: Time.current,
+      raw_holdings_payload: [],
+      raw_activities_payload: [
+        snaptrade_activity("vest", "OTHER", 3, units: 13, price: 0, amount: 0),
+        snaptrade_activity("sale", "SELL", 2, units: -13, price: 100, amount: 1300),
+        snaptrade_activity("payout", "TRANSFER", 1, amount: -1300)
+      ]
+    )
+    reverse_sync!
+    @account.holdings.where(date: Date.current).update_all(qty: 13, amount: 1300)
+
+    reverse_sync!
+
+    held = [ 4, 3, 2, 0 ].index_with { |days_ago| held_qty(days_ago) }
+    assert_equal({ 4 => 0, 3 => 13, 2 => 0, 0 => 0 }, held)
+    assert_no_negative_history
+
+    synced_once = synced_series
+    reverse_sync!
+    assert_equal synced_once, synced_series, "a second sync changes nothing"
+  end
+
+  test "an empty list clears each position Sure's calculation held, whatever day it last calculated it" do
+    @account.holdings.create!(security: securities(:aapl), date: Date.current - 1.day, currency: "USD", qty: 13, price: 150, amount: 1950)
+    @account.holdings.create!(security: securities(:msft), date: Date.current, currency: "USD", qty: 5, price: 200, amount: 1000)
+
+    sync_positions!([], total: 1000)
+
+    cleared = @account.holdings.where(date: Date.current).where.not(account_provider_id: nil).pluck(:security_id, :qty).to_h
+    assert_equal({ securities(:aapl).id => 0, securities(:msft).id => 0 }, cleared)
+  end
+
+  test "an empty list keeps a position only Sure's calculation held while the total reports holdings" do
+    @account.holdings.create!(security: securities(:aapl), date: Date.current, currency: "USD", qty: 13, price: 150, amount: 1950)
+
+    sync_positions!([], total: 2500)
+
+    assert_not @account.holdings.where.not(account_provider_id: nil).exists?
+    assert_equal 13, @account.holdings.find_by!(security: securities(:aapl), date: Date.current).qty
+  end
+
   test "a position held across a share movement at no price keeps its value without market prices" do
     @snaptrade_account.update!(
       current_balance: 10945,
