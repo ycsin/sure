@@ -3,6 +3,11 @@ class TruelayerAccount < ApplicationRecord
 
   KINDS = %w[account card].freeze
 
+  # How far inside a fetch's range a stored transaction must be dated before
+  # its absence from that fetch counts. Banks filter by their own calendar
+  # date and time zone, and some date a transaction ahead of today.
+  WITHDRAWAL_MARGIN = 1.day
+
   if encryption_ready?
     encrypts :raw_payload
     encrypts :raw_transactions_payload
@@ -106,16 +111,32 @@ class TruelayerAccount < ApplicationRecord
   # transaction id, so history fetched right after consent survives later,
   # narrower syncs. Pending transactions are skipped: their ids change once
   # they book.
-  def merge_truelayer_transactions!(transactions)
-    merged = Array(raw_transactions_payload).index_by { |t| self.class.transaction_id_for(t) }
+  #
+  # A bank can also withdraw a booked transaction, for example replacing a
+  # provisional cheque deposit with the cleared one under a new id. Given
+  # `covered`, the time range the fetch asked for, a stored transaction dated
+  # well inside it that the fetch no longer returns is dropped, and so is its
+  # entry. A fetch without booked transactions drops nothing: an empty answer
+  # is likelier a bank fault than every transaction being withdrawn.
+  def merge_truelayer_transactions!(transactions, covered: nil)
+    fetched = {}
     transactions.each do |transaction|
       next if transaction[:status].to_s == "pending"
 
       id = self.class.transaction_id_for(transaction)
-      merged[id] = transaction if id.present?
+      fetched[id] = transaction if id.present?
     end
 
-    update!(raw_transactions_payload: merged.values.sort_by { |t| t.with_indifferent_access[:timestamp].to_s })
+    stored = Array(raw_transactions_payload).index_by { |t| self.class.transaction_id_for(t) }
+    withdrawn = covered && fetched.any? ? stored.keys.select { |id| !fetched.key?(id) && dated_within?(stored[id], covered) } : []
+    merged = stored.except(*withdrawn).merge(fetched)
+
+    removed = kept = 0
+    self.class.transaction do
+      update!(raw_transactions_payload: merged.values.sort_by { |t| t.with_indifferent_access[:timestamp].to_s })
+      removed, kept = remove_withdrawn_entries(withdrawn) if withdrawn.any?
+    end
+    capture_withdrawn(withdrawn, removed: removed, kept: kept) if withdrawn.any?
   end
 
   # TrueLayer's `current` balance: what the account holds, or for a card the
@@ -125,6 +146,40 @@ class TruelayerAccount < ApplicationRecord
   end
 
   private
+
+    def dated_within?(transaction, range)
+      time = Time.iso8601(transaction.with_indifferent_access[:timestamp].to_s)
+      time >= range.begin + WITHDRAWAL_MARGIN && time <= range.end - WITHDRAWAL_MARGIN
+    rescue ArgumentError
+      false
+    end
+
+    # Deletes the entries of withdrawn transactions and returns how many were
+    # removed and kept. An entry the user has taken over (see
+    # Entry#protected_from_sync?) stays as it is: deleting it would discard
+    # their changes, and with a split, its parts.
+    def remove_withdrawn_entries(ids)
+      return [ 0, 0 ] unless account
+
+      kept, removed = account.entries.where(source: "truelayer", external_id: ids.map { |id| "truelayer_#{id}" }).partition(&:protected_from_sync?)
+      removed.each(&:destroy!)
+      [ removed.size, kept.size ]
+    end
+
+    # Logged after the commit, so support can trace a transaction that
+    # vanished or stayed.
+    def capture_withdrawn(ids, removed:, kept:)
+      DebugLogEntry.capture(
+        category: "provider_sync",
+        level: "info",
+        message: "TrueLayer no longer returns #{ids.size} stored transaction(s)",
+        source: self.class.name,
+        provider_key: "truelayer",
+        family: truelayer_item.family,
+        account_provider: account_provider,
+        metadata: { account_id: account_id, transaction_ids: ids.first(10), entries_removed: removed, entries_kept: kept }
+      )
+    end
 
     def log_invalid_currency(currency_value)
       Rails.logger.warn("Invalid currency code '#{currency_value}' for TrueLayer account #{id}, defaulting to GBP")

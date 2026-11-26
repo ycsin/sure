@@ -47,8 +47,11 @@ never more than 89 days back. Unattended access is rate limited (often about fou
 requests per endpoint per day), so a rate-limited request is not retried.
 
 Transactions are matched by TrueLayer's stable transaction id, so re-syncing never
-creates duplicates. Card charges are imported as spending and refunds as income.
-Pending transactions are not imported; they appear once they are booked.
+creates duplicates. A bank can still replace a booked transaction with a new one, for
+example when a paid-in cheque clears; within a day or so, a sync removes the copy the
+bank no longer lists, unless you have edited or excluded it. Card charges are imported
+as spending and refunds as income. Pending transactions are not imported; they appear
+once they are booked.
 
 ## 4. Reconnecting
 

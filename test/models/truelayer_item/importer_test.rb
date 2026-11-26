@@ -294,6 +294,35 @@ class TruelayerItem::ImporterTest < ActiveSupport::TestCase
     assert TruelayerItem::Importer.new(@item).import[:success]
   end
 
+  test "the regular sync drops a stored transaction the bank no longer returns" do
+    linked = link(@item.truelayer_accounts.create!(account_id: "a1", name: "Acc", currency: "GBP"))
+    linked.update!(raw_transactions_payload: [ dated_txn("provisional", 3.days.ago), dated_txn("kept", 2.days.ago) ])
+    @item.stubs(:last_synced_at).returns(1.hour.ago)
+    @provider.stubs(:get_accounts).returns([ account_snapshot("a1", "Acc") ])
+    @provider.stubs(:get_cards).returns([])
+    @provider.stubs(:get_balance).returns(current: 1, currency: "GBP")
+    @provider.expects(:get_transactions).once.returns([ dated_txn("cleared", 3.days.ago), dated_txn("kept", 2.days.ago) ])
+
+    assert TruelayerItem::Importer.new(@item).import[:success]
+
+    assert_equal %w[cleared kept], linked.reload.raw_transactions_payload.map { |t| t["transaction_id"] }.sort
+  end
+
+  test "a backfill never drops stored transactions" do
+    @item.update!(last_authorized_at: 1.minute.ago)
+    account = @item.truelayer_accounts.create!(account_id: "a1", name: "Unlinked", currency: "GBP")
+    account.update!(raw_transactions_payload: [ dated_txn("earlier-consent", 3.days.ago) ])
+    @provider.stubs(:get_accounts).returns([ account_snapshot("a1", "Unlinked") ])
+    @provider.stubs(:get_cards).returns([])
+    @provider.stubs(:get_balance).returns(current: 1, currency: "GBP")
+    @provider.stubs(:get_transactions).returns([ dated_txn("recent", 2.days.ago) ]).then.returns([])
+      .then.raises(Provider::Truelayer::TruelayerError.new("sca_exceeded", :bad_request, status: 400))
+
+    assert TruelayerItem::Importer.new(@item).import[:success]
+
+    assert_equal %w[earlier-consent recent], account.reload.raw_transactions_payload.map { |t| t["transaction_id"] }.sort
+  end
+
   private
 
     def account_snapshot(id, name)
@@ -302,6 +331,10 @@ class TruelayerItem::ImporterTest < ActiveSupport::TestCase
 
     def txn(id)
       { transaction_id: id, amount: -1, timestamp: "2025-01-01T00:00:00Z", currency: "GBP", description: "x" }
+    end
+
+    def dated_txn(id, time)
+      txn(id).merge(timestamp: "#{time.to_date.iso8601}T00:00:00Z")
     end
 
     def link(truelayer_account)
