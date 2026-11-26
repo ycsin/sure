@@ -3,7 +3,7 @@ import * as d3 from "d3";
 import { sankey, sankeyCenter } from "d3-sankey";
 import { formatCashFlowCurrency } from "utils/cash_flow_chart_data";
 import { CHART_TOOLTIP_CLASSES } from "utils/chart_tooltip";
-import { sankeyLabelOnRight } from "utils/sankey_align";
+import { sankeyLabelOnRight, sankeyParentOrder } from "utils/sankey_align";
 import { hiddenSankeyLabels } from "utils/sankey_labels";
 import { sankeyNodeHasChildren, zoomSankeyData } from "utils/sankey_zoom";
 import {
@@ -320,20 +320,31 @@ export default class extends Controller {
         [width - margin, height - margin],
       ]);
 
+    const layout = () =>
+      sankeyGenerator({
+        nodes: nodes.map((d) => ({
+          ...d,
+          // Structural labels belong to the UI locale, not the API fallback name.
+          name: this.labelsValue[d.kind] || d.name,
+        })),
+        links: links.map((d) => ({ ...d })),
+      });
+
     if (this.sortOrder === "ascending") {
       sankeyGenerator.nodeSort((a, b) => a.value - b.value);
     } else if (this.sortOrder === "descending") {
       sankeyGenerator.nodeSort((a, b) => b.value - a.value);
+    } else {
+      // With subcategories, a second pass keeps the first one's columns but
+      // places each subcategory by its parent, so their links don't cross.
+      const firstPass = layout();
+      const parentOrder = sankeyParentOrder(firstPass);
+      if (!parentOrder) return firstPass;
+
+      sankeyGenerator.nodeSort(parentOrder);
     }
 
-    return sankeyGenerator({
-      nodes: nodes.map((d) => ({
-        ...d,
-        // Structural labels belong to the UI locale, not the API fallback name.
-        name: this.labelsValue[d.kind] || d.name,
-      })),
-      links: links.map((d) => ({ ...d })),
-    });
+    return layout();
   }
 
   #createGradients(svg, links) {

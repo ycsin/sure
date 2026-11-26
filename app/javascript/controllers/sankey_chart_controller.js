@@ -2,7 +2,7 @@ import { Controller } from "@hotwired/stimulus";
 import * as d3 from "d3";
 import { sankey, sankeyCenter } from "d3-sankey";
 import { CHART_TOOLTIP_CLASSES } from "utils/chart_tooltip";
-import { sankeyLabelOnRight } from "utils/sankey_align";
+import { sankeyLabelOnRight, sankeyParentOrder } from "utils/sankey_align";
 import { hiddenSankeyLabels } from "utils/sankey_labels";
 import { withoutSankeySubcategories } from "utils/sankey_subcategories";
 import { sankeyNodeHasChildren, zoomSankeyData } from "utils/sankey_zoom";
@@ -286,11 +286,20 @@ export default class extends Controller {
         [margin, margin],
         [width - margin, height - margin],
       ]);
+    const layout = () =>
+      sankeyGenerator({
+        nodes: nodes.map((d) => ({ ...d })),
+        links: links.map((d) => ({ ...d })),
+      });
 
-    return sankeyGenerator({
-      nodes: nodes.map((d) => ({ ...d })),
-      links: links.map((d) => ({ ...d })),
-    });
+    // With subcategories, a second pass keeps the first one's columns but
+    // places each subcategory by its parent, so their links don't cross.
+    const firstPass = layout();
+    const parentOrder = sankeyParentOrder(firstPass);
+    if (!parentOrder) return firstPass;
+
+    sankeyGenerator.nodeSort(parentOrder);
+    return layout();
   }
 
   #createGradients(svg, links) {
