@@ -177,13 +177,17 @@ class TruelayerItem::Importer
     # Returns true when the account's transactions were fetched in full, so
     # the caller can record the backfill as complete.
     def import_transactions(truelayer_account, result, backfill:)
+      covered = nil
       history = if backfill
         fetch_full_history(truelayer_account)
       else
-        History.new(fetch_range(truelayer_account, sync_start_for(truelayer_account), Time.current), true, nil)
+        covered = sync_start_for(truelayer_account)..Time.current
+        History.new(fetch_range(truelayer_account, covered.begin, covered.end), true, nil)
       end
 
-      truelayer_account.merge_truelayer_transactions!(history.transactions)
+      # Only the regular range shows a withdrawn transaction: a backfill may
+      # get an empty answer, not a refusal, for years the bank can't serve.
+      truelayer_account.merge_truelayer_transactions!(history.transactions, covered: covered)
       result[:transactions_imported] += history.transactions.size
 
       if history.error
